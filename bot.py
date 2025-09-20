@@ -4,7 +4,10 @@ import asyncio
 import feedparser
 from aiogram import Bot, Dispatcher, executor, types
 
-TOKEN = os.getenv("BOT_TOKEN")
+API_TOKEN = os.getenv("API_TOKEN", "").strip()  # 👈 اینجا strip اضافه شد
+
+if not API_TOKEN:
+    raise ValueError("❌ API_TOKEN تنظیم نشده!")
 
 bot = Bot(token=API_TOKEN, parse_mode="Markdown")
 dp = Dispatcher(bot)
