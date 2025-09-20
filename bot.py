@@ -1,129 +1,183 @@
 import os
+import json
+import asyncio
 import feedparser
-import requests
-from bs4 import BeautifulSoup
-from aiogram import Bot, Dispatcher, types
-from aiogram.utils import executor
+from aiogram import Bot, Dispatcher, executor, types
 
-# گرفتن توکن از Railway → Environment Variables
-TOKEN = os.getenv("BOT_TOKEN")
+API_TOKEN = "توکن رباتت اینجا"
 
-bot = Bot(token=TOKEN)
+bot = Bot(token=API_TOKEN, parse_mode="Markdown")
 dp = Dispatcher(bot)
 
-# ذخیره انتخاب بخش کاربر
-user_section = {}
+# فایل اشتراک‌ها
+SUB_FILE = "subscriptions.json"
+if not os.path.exists(SUB_FILE):
+    with open(SUB_FILE, "w", encoding="utf-8") as f:
+        json.dump({}, f, ensure_ascii=False, indent=2)
 
-# --- تابع جستجو در RSS ---
-def search_rss(feed_url, keyword):
-    feed = feedparser.parse(feed_url)
-    for entry in feed.entries[:10]:
-        if keyword.lower() in entry.title.lower() or keyword.lower() in entry.summary.lower():
-            return {
-                "title": entry.title,
-                "summary": entry.summary[:300] + "...",
-                "link": entry.link
-            }
-    return None
+# فایل آخرین لینک‌های ارسال‌شده
+LAST_FILE = "last_seen.json"
+if not os.path.exists(LAST_FILE):
+    with open(LAST_FILE, "w", encoding="utf-8") as f:
+        json.dump({}, f, ensure_ascii=False, indent=2)
 
-# --- جستجو در سنجش ---
-def search_sanjesh(keyword):
-    url = "https://www.sanjesh.org/"
-    r = requests.get(url)
-    soup = BeautifulSoup(r.text, "html.parser")
 
-    items = soup.find_all("a")
-    for item in items:
-        title = item.get_text(strip=True)
-        link = item.get("href")
-        if title and keyword in title:
-            return {
-                "title": title,
-                "summary": title,
-                "link": url + link if link.startswith("/") else link
-            }
-    return None
+# -------------------- مدیریت فایل JSON --------------------
+def load_json(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-# --- جستجو در ایران مشاوره ---
-def search_iranmoshavere(keyword):
-    url = "https://iranmoshavere.com/"
-    r = requests.get(url)
-    soup = BeautifulSoup(r.text, "html.parser")
 
-    items = soup.find_all("a")
-    for item in items:
-        title = item.get_text(strip=True)
-        link = item.get("href")
-        if title and keyword in title:
-            return {
-                "title": title,
-                "summary": title,
-                "link": link
-            }
-    return None
+def save_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-# --- جستجو در gov.ir (سایر اطلاعیه‌ها) ---
-def search_gov(keyword):
-    url = "https://www.gov.ir/fa/news"
-    r = requests.get(url)
-    soup = BeautifulSoup(r.text, "html.parser")
 
-    items = soup.find_all("a")
-    for item in items:
-        title = item.get_text(strip=True)
-        link = item.get("href")
-        if title and keyword in title:
-            return {
-                "title": title,
-                "summary": title,
-                "link": "https://www.gov.ir" + link if link.startswith("/") else link
-            }
-    return None
+def add_subscription(user_id, category):
+    data = load_json(SUB_FILE)
+    uid = str(user_id)
+    if uid not in data:
+        data[uid] = []
+    if category not in data[uid]:
+        data[uid].append(category)
+    save_json(SUB_FILE, data)
 
-# --- استارت ---
-@dp.message_handler(commands=['start'])
-async def start(message: types.Message):
+
+def get_subscriptions():
+    return load_json(SUB_FILE)
+
+
+# -------------------- دسته‌ها و فیدها --------------------
+CATEGORIES = {
+    "استخدام": [
+        "https://iranestekhdam.ir/feed",
+        "https://www.e-estekhdam.com/feed",
+    ],
+    "دانشگاهی": [
+        "https://iranmoshavere.com/feed",
+    ],
+    "سایر": [
+        "https://www.medu.ir/fa/news/rss",  # نمونه: وزارت آموزش و پرورش
+    ],
+}
+
+
+# -------------------- دستورات اصلی --------------------
+@dp.message_handler(commands=["start"])
+async def start_cmd(message: types.Message):
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("📢 اطلاعیه استخدامی", "🎓 اطلاعیه دانشگاهی", "🌐 سایر اطلاعیه‌ها")
-    await message.answer("سلام 👋 به ربات کافی‌نت خوش اومدی!\nیکی از بخش‌ها رو انتخاب کن:", reply_markup=kb)
+    for cat in CATEGORIES.keys():
+        kb.add(cat)
+    kb.add("📌 اشتراک‌های من")
+    await message.answer("سلام 👋 یکی از دسته‌ها رو انتخاب کن:", reply_markup=kb)
 
-# --- انتخاب بخش ---
-@dp.message_handler(lambda m: m.text in ["📢 اطلاعیه استخدامی", "🎓 اطلاعیه دانشگاهی", "🌐 سایر اطلاعیه‌ها"])
-async def choose_section(message: types.Message):
-    user_section[message.chat.id] = message.text
-    await message.answer("🔎 لطفا کلمه مورد نظر رو بفرست (مثلا: کنکور، بانک، آموزش و پرورش...)")
 
-# --- جستجو بر اساس بخش انتخاب‌شده ---
-@dp.message_handler()
-async def handle_query(message: types.Message):
-    section = user_section.get(message.chat.id, None)
-    query = message.text.strip()
+waiting_for_keyword = {}
 
-    result = None
 
-    if section == "📢 اطلاعیه استخدامی":
-        result = search_rss("https://iranestekhdam.ir/feed", query)
-        if not result:
-            result = search_rss("https://www.e-estekhdam.com/feed", query)
+@dp.message_handler(lambda msg: msg.text in CATEGORIES.keys())
+async def choose_category(message: types.Message):
+    category = message.text
+    waiting_for_keyword[message.from_user.id] = category
+    kb = types.InlineKeyboardMarkup()
+    kb.add(types.InlineKeyboardButton("🔔 عضویت در این دسته", callback_data=f"subscribe_{category}"))
+    await message.answer(
+        f"🔍 دسته «{category}» انتخاب شد.\n\nکلمه مورد نظر رو برای جستجو بفرست:",
+        reply_markup=kb,
+    )
 
-    elif section == "🎓 اطلاعیه دانشگاهی":
-        result = search_sanjesh(query)
-        if not result:
-            result = search_iranmoshavere(query)
 
-    elif section == "🌐 سایر اطلاعیه‌ها":
-        result = search_gov(query)
+@dp.message_handler(lambda msg: msg.chat.id in waiting_for_keyword)
+async def handle_keyword(message: types.Message):
+    user_id = message.from_user.id
+    category = waiting_for_keyword[user_id]
+    keyword = message.text.strip()
 
-    if result:
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("🌐 مطالعه بیشتر", url=result["link"]))
-        await message.answer(
-            f"📌 {result['title']}\n\n🔎 {result['summary']}",
-            reply_markup=kb
-        )
+    urls = CATEGORIES.get(category, [])
+    results = []
+
+    for url in urls:
+        feed = feedparser.parse(url)
+        for entry in feed.entries[:10]:
+            title = entry.title
+            summary = getattr(entry, "summary", "")
+            link = entry.link
+
+            if keyword.lower() in title.lower() or keyword.lower() in summary.lower():
+                results.append(
+                    {
+                        "title": title,
+                        "summary": summary[:300] + "..." if summary else "بدون توضیحات",
+                        "link": link,
+                    }
+                )
+
+    if not results:
+        await message.answer("❌ چیزی پیدا نشد، لطفا کلمه دیگه‌ای امتحان کن")
+        return
+
+    for item in results[:5]:  # فقط ۵ نتیجه
+        text = f"📌 {item['title']}\n\n📝 {item['summary']}\n\n🔗 [مطالعه بیشتر]({item['link']})"
+        await message.answer(text, disable_web_page_preview=True)
+
+
+@dp.callback_query_handler(lambda c: c.data.startswith("subscribe_"))
+async def subscribe_category(callback: types.CallbackQuery):
+    category = callback.data.split("subscribe_")[1]
+    add_subscription(callback.from_user.id, category)
+    await callback.answer("✅ عضویت ثبت شد")
+    await callback.message.answer(f"شما الان عضو اطلاعیه‌های «{category}» شدید.")
+
+
+@dp.message_handler(lambda msg: msg.text == "📌 اشتراک‌های من")
+async def my_subs(message: types.Message):
+    subs = get_subscriptions().get(str(message.from_user.id), [])
+    if not subs:
+        await message.answer("📭 شما در هیچ دسته‌ای عضو نیستید.")
     else:
-        await message.answer("❌ چیزی پیدا نشد، لطفا کلمه دیگه‌ای امتحان کن.")
+        await message.answer("📌 دسته‌های شما:\n" + "\n".join([f"🔔 {s}" for s in subs]))
 
-# --- اجرای ربات ---
+
+# -------------------- زمان‌بندی ارسال خودکار --------------------
+async def fetch_and_notify(category, urls, subscriptions):
+    last_seen = load_json(LAST_FILE)
+    seen_links = set(last_seen.get(category, []))
+
+    new_posts = []
+    for url in urls:
+        feed = feedparser.parse(url)
+        for entry in feed.entries[:5]:
+            if entry.link not in seen_links:
+                new_posts.append(entry)
+
+    if not new_posts:
+        return
+
+    all_links = list(seen_links) + [p.link for p in new_posts]
+    last_seen[category] = all_links[-20:]
+    save_json(LAST_FILE, last_seen)
+
+    for post in new_posts:
+        text = f"📌 {post.title}\n\n📝 {getattr(post, 'summary', '')[:300]}...\n\n🔗 [مطالعه بیشتر]({post.link})"
+        for user_id, cats in subscriptions.items():
+            if category in cats:
+                try:
+                    await bot.send_message(int(user_id), text, disable_web_page_preview=True)
+                except Exception as e:
+                    print(f"❌ ارسال برای {user_id} ناموفق: {e}")
+
+
+async def scheduler():
+    while True:
+        subs = get_subscriptions()
+        for category, urls in CATEGORIES.items():
+            await fetch_and_notify(category, urls, subs)
+        await asyncio.sleep(1800)  # هر ۳۰ دقیقه
+
+
+async def on_startup(dp):
+    asyncio.create_task(scheduler())
+
+
 if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
