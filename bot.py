@@ -22,7 +22,7 @@ if not CHANNEL_ID:
 
 CHANNEL_ID_INT = int(CHANNEL_ID)
 
-bot = Bot(token=BOT_TOKEN, parse_mode="Markdown")
+bot = Bot(token=BOT_TOKEN, parse_mode="MarkdownV2")
 dp = Dispatcher(bot)
 
 # global db pool
@@ -486,7 +486,9 @@ async def on_startup(dispatcher):
 async def on_shutdown(dispatcher):
     if db_pool:
         await db_pool.close()
-    await bot.session.close()
+    session = await bot.get_session()
+    await session.close()
+
     print("بوت خاموش شد.")
 
 if __name__ == "__main__":
