@@ -69,6 +69,118 @@ async def init_db():
     print("✅ DB initialized")
 
 
+# ==================
+# تابع اضافه کردن پست
+# ==================
+def add_post(message_id, title, content, hashtags):
+    """
+    یک پست جدید با هشتگ‌ها ذخیره می‌کند.
+    """
+    cur.execute(
+        "INSERT INTO posts (message_id, title, content) VALUES (%s, %s, %s) RETURNING id",
+        (message_id, title, content),
+    )
+    post_id = cur.fetchone()[0]
+
+    # ثبت هشتگ‌ها
+    for tag in hashtags:
+        cur.execute(
+            "INSERT INTO hashtags (name) VALUES (%s) ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name RETURNING id",
+            (tag,),
+        )
+        hashtag_id = cur.fetchone()[0]
+
+        cur.execute(
+            "INSERT INTO post_hashtags (post_id, hashtag_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (post_id, hashtag_id),
+        )
+
+    conn.commit()
+    return post_id
+
+# ===========================
+# گرفتن پست‌ها بر اساس هشتگ
+# ===========================
+def get_posts_by_hashtag(hashtag, limit=5):
+    cur.execute("""
+        SELECT p.title, p.content, p.message_id
+        FROM posts p
+        JOIN post_hashtags ph ON p.id = ph.post_id
+        JOIN hashtags h ON ph.hashtag_id = h.id
+        WHERE h.name = %s
+        ORDER BY p.created_at DESC
+        LIMIT %s
+    """, (hashtag, limit))
+    return cur.fetchall()
+
+# ===========================
+# جستجو در عناوین
+# ===========================
+def search_posts(keyword, limit=5):
+    cur.execute("""
+        SELECT title, content, message_id
+        FROM posts
+        WHERE title ILIKE %s
+        ORDER BY created_at DESC
+        LIMIT %s
+    """, (f"%{keyword}%", limit))
+    return cur.fetchall()
+
+# ===========================
+# عضویت کاربر در یک هشتگ
+# ===========================
+def subscribe_user(user_id, hashtag):
+    cur.execute(
+        "INSERT INTO hashtags (name) VALUES (%s) ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name RETURNING id",
+        (hashtag,),
+    )
+    hashtag_id = cur.fetchone()[0]
+
+    cur.execute(
+        "INSERT INTO subscriptions (user_id, hashtag_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+        (user_id, hashtag_id),
+    )
+    conn.commit()
+# ===========================
+# لیست اشتراک‌های کاربر
+# ===========================
+def get_user_subscriptions(user_id):
+    cur.execute("""
+        SELECT h.name
+        FROM subscriptions s
+        JOIN hashtags h ON s.hashtag_id = h.id
+        WHERE s.user_id = %s
+    """, (user_id,))
+    return [row[0] for row in cur.fetchall()]
+
+# ===========================
+# گرفتن کاربران مشترک یک هشتگ
+# ===========================
+def get_subscribers(hashtag):
+    cur.execute("""
+        SELECT s.user_id
+        FROM subscriptions s
+        JOIN hashtags h ON s.hashtag_id = h.id
+        WHERE h.name = %s
+    """, (hashtag,))
+    return [row[0] for row in cur.fetchall()]
+
+# ===========================
+# محدود کردن تعداد پست‌ها
+# ===========================
+def cleanup_old_posts(max_posts=1000):
+    cur.execute("""
+        DELETE FROM posts
+        WHERE id IN (
+            SELECT id FROM posts
+            ORDER BY created_at ASC
+            OFFSET %s
+        )
+    """, (max_posts,))
+    conn.commit()
+
+
+
 async def get_or_create_hashtag(conn, name: str) -> int:
     # name assumed like "#استخدام"
     row = await conn.fetchrow("SELECT id FROM hashtags WHERE name = $1", name)
