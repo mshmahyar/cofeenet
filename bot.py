@@ -382,7 +382,7 @@ async def cmd_start(msg: types.Message):
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("🔍 جستجو اطلاعیه/خبر", "🔔 دریافت خودکار اطلاعیه/خبر")
     await msg.answer(
-        "سلام! من ربات اطلاع‌رسانی کافی‌نت هستم. یکی از گزینه‌ها را انتخاب کن:",
+        "سلام. من ربات اطلاع‌رسانی کافی‌نت هستم. یکی از گزینه‌ها را انتخاب کن:",
         reply_markup=kb,
         parse_mode="Markdown"  # Markdown قدیمی
     )
@@ -390,7 +390,7 @@ async def cmd_start(msg: types.Message):
 @dp.message_handler(lambda m: m.text == "🔍 جستجو اطلاعیه/خبر")
 async def start_search_flow(msg: types.Message):
     waiting_for_search[msg.chat.id] = True
-    await msg.answer("🔎 لطفاً کلیدواژهٔ جستجو را بفرست (جستجو فقط در عنوان‌ها انجام خواهد شد):")
+    await msg.answer("🔎 لطفاً کلیدواژهٔ جستجو را بفرست :")
 
 @dp.message_handler(lambda m: m.chat.id in waiting_for_search)
 async def handle_search_input(msg: types.Message):
