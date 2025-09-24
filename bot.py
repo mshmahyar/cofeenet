@@ -70,19 +70,6 @@ async def set_search_limit(msg: types.Message):
     user_search_limit[msg.from_user.id] = n
     await msg.answer(f"✅ تعداد پست در جستجو روی {n} تنظیم شد")
 
-# ----------------- DB helpers -----------------
-
-            # حذف پست‌های قدیمی بیش از 1000
-            total = await conn.fetchval("SELECT COUNT(*) FROM posts")
-            if total > 1000:
-                to_remove = await conn.fetch("SELECT id FROM posts ORDER BY created_at ASC LIMIT $1", total-1000)
-                for r in to_remove:
-                    await conn.execute("DELETE FROM posts WHERE id=$1", r["id"])
-
-async def get_post_db_row_by_message_id(message_id: int):
-    async with db_pool.acquire() as conn:
-        return await conn.fetchrow("SELECT id,message_id,title,content FROM posts WHERE message_id=$1", message_id)
-
 
 
 # ----------------- تعداد پست در هر جستجو -----------------
