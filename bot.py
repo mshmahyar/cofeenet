@@ -23,6 +23,11 @@ waiting_for_keyword: dict[int, bool] = {}
 waiting_for_limit: dict[int, bool] = {}
 user_search_limit: dict[int, int] = {}
 
+@dp.callback_query_handler()
+async def debug_all_callbacks(call: types.CallbackQuery):
+    print("📥 Callback received:", call.data)
+    await call.answer("دکمه کلیک شد ✅")
+
 # ----------------- DB pool -----------------
 db_pool: asyncpg.pool.Pool | None = None
 
