@@ -21,6 +21,7 @@ dp = Dispatcher(bot)
 
 waiting_for_search: dict[int, str | bool] = {}  # مقدار می‌تواند True یا "set_limit" باشد
 user_search_limit: dict[int,int] = {}  # chat_id -> تعداد پست
+user_search_limit = {}
 
 # ----------------- DB pool -----------------
 db_pool: asyncpg.pool.Pool | None = None
@@ -73,21 +74,35 @@ async def set_search_limit(msg: types.Message):
 
 
 # ----------------- تعداد پست در هر جستجو -----------------
-limit = user_search_limit.get(msg.chat.id, 5)
-results = await search_posts_by_keyword(msg.text.strip(), limit=limit)
-
 def get_user_search_limit(chat_id: int) -> int:
-    return user_search_limit.get(chat_id, 5)  # پیش‌فرض 5 پست
+    # پیش‌فرض 5 تا پست برمی‌گردونه
+    return user_search_limit.get(chat_id, 5)
+
 
 async def search_posts_by_keyword(keyword: str, limit: int = 5):
     kw = f"%{keyword}%"
     async with db_pool.acquire() as conn:
         return await conn.fetch("""
-            SELECT message_id,title FROM posts
+            SELECT message_id, title 
+            FROM posts
             WHERE title ILIKE $1
             ORDER BY created_at DESC
             LIMIT $2
         """, kw, limit)
+
+# هندلر برای سرچ
+@dp.message_handler()
+async def handle_search(msg: types.Message):
+    limit = get_user_search_limit(msg.chat.id)
+    results = await search_posts_by_keyword(msg.text.strip(), limit=limit)
+
+    if not results:
+        await msg.reply("❌ چیزی پیدا نشد.")
+    else:
+        text = "🔎 نتایج:\n\n"
+        for i, row in enumerate(results, 1):
+            text += f"{i}. {row['title']} (ID: {row['message_id']})\n"
+        await msg.reply(text)
 
 async def search_posts_by_tag(tag_name: str, limit: int = 5):
     async with db_pool.acquire() as conn:
