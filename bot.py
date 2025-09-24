@@ -19,6 +19,9 @@ CHANNEL_ID_INT = int(CHANNEL_ID)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
+waiting_for_search: dict[int, str | bool] = {}  # مقدار می‌تواند True یا "set_limit" باشد
+user_search_limit: dict[int,int] = {}  # chat_id -> تعداد پست
+
 # ----------------- DB pool -----------------
 db_pool: asyncpg.pool.Pool | None = None
 
@@ -55,6 +58,17 @@ async def init_db():
             if s:
                 await conn.execute(s + ";")
     print("✅ DB initialized")
+
+user_search_limit: dict[int,int] = {}
+
+@dp.message_handler(lambda m: m.text.isdigit())
+async def set_search_limit(msg: types.Message):
+    n = int(msg.text.strip())
+    if n < 1 or n > 20:
+        await msg.answer("❌ لطفاً عددی بین 1 تا 20 وارد کنید")
+        return
+    user_search_limit[msg.from_user.id] = n
+    await msg.answer(f"✅ تعداد پست در جستجو روی {n} تنظیم شد")
 
 # ----------------- DB helpers -----------------
 async def get_or_create_hashtag(conn, name: str) -> int:
@@ -106,7 +120,8 @@ async def get_hashtags_for_post(post_db_id: int) -> list[str]:
         return [r["name"] for r in rows]
 
 # ----------------- تعداد پست در هر جستجو -----------------
-user_search_limit: dict[int,int] = {}  # chat_id -> تعداد پست
+limit = user_search_limit.get(msg.chat.id, 5)
+results = await search_posts_by_keyword(msg.text.strip(), limit=limit)
 
 def get_user_search_limit(chat_id: int) -> int:
     return user_search_limit.get(chat_id, 5)  # پیش‌فرض 5 پست
@@ -201,8 +216,6 @@ async def channel_post_handler(message: types.Message):
             await copy_post_to_user(uid, CHANNEL_ID_INT, message.message_id, tags)
 
 # ----------------- منو و جستجو -----------------
-waiting_for_search: dict[int,bool] = {}
-
 @dp.message_handler(commands=["start"])
 async def cmd_start(msg: types.Message):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
@@ -213,6 +226,16 @@ async def cmd_start(msg: types.Message):
         reply_markup=kb
     )
 
+@dp.message_handler(lambda m: m.text.isdigit())
+async def set_search_limit(msg: types.Message):
+    n = int(msg.text.strip())
+    if n < 1 or n > 20:
+        await msg.answer("❌ لطفاً عددی بین 1 تا 20 وارد کنید")
+        return
+    user_search_limit[msg.from_user.id] = n
+    await msg.answer(f"✅ تعداد پست در جستجو روی {n} تنظیم شد")
+
+
 # --- جستجوی پست ---
 @dp.message_handler(lambda m: m.text=="🔍 جستجو اطلاعیه/خبر")
 async def start_search_flow(msg: types.Message):
@@ -221,9 +244,11 @@ async def start_search_flow(msg: types.Message):
 
 @dp.message_handler(lambda m: m.chat.id in waiting_for_search)
 async def handle_search_input(msg: types.Message):
-    if not waiting_for_search.pop(msg.chat.id, None): return
-    limit = get_user_search_limit(msg.chat.id)
-    results = await search_posts_by_keyword(msg.text.strip(), limit)
+    if not waiting_for_search.pop(msg.chat.id, None): 
+        return
+
+    limit = user_search_limit.get(msg.chat.id, 5)  # <--- استفاده از مقدار تنظیم شده
+    results = await search_posts_by_keyword(msg.text.strip(), limit=limit)
     if not results:
         await msg.answer("❌ موردی پیدا نشد.")
         return
@@ -231,6 +256,7 @@ async def handle_search_input(msg: types.Message):
         row = await get_post_db_row_by_message_id(r["message_id"])
         tags = await get_hashtags_for_post(row["id"]) if row else []
         await copy_post_to_user(msg.chat.id, CHANNEL_ID_INT, r["message_id"], tags)
+
 
 # --- منوی اشتراک ---
 @dp.message_handler(lambda m: m.text=="🔔 دریافت خودکار اطلاعیه/خبر")
