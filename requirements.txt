@@ -1,5 +1,5 @@
 aiogram==2.25.1
-aiohttp-py3.13==3.8.6
+aiohttp==3.8.6
 feedparser==6.0.11
 beautifulsoup4==4.12.3
 requests==2.31.0
