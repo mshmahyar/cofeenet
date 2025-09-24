@@ -181,7 +181,6 @@ async def channel_post_handler(message: types.Message):
         for uid in set(subs):
             await copy_post_to_user(uid, CHANNEL_ID_INT, message.message_id, tags)
 
-# تابع ذخیره پست و تگ‌ها
 async def save_post_and_tags(message_id: int, title: str, content: str, tags: list[str]):
     async with db_pool.acquire() as conn:
         async with conn.transaction():
@@ -198,19 +197,15 @@ async def save_post_and_tags(message_id: int, title: str, content: str, tags: li
             )
             post_db_id = rec["id"]
 
-
             # حذف پست‌های قدیمی بیش از 1000
             total = await conn.fetchval("SELECT COUNT(*) FROM posts")
             if total > 1000:
-                to_remove = await conn.fetch("SELECT id FROM posts ORDER BY created_at ASC LIMIT $1", total-1000)
+                to_remove = await conn.fetch(
+                    "SELECT id FROM posts ORDER BY created_at ASC LIMIT $1",
+                    total - 1000
+                )
                 for r in to_remove:
                     await conn.execute("DELETE FROM posts WHERE id=$1", r["id"])
-
-async def get_post_db_row_by_message_id(message_id: int):
-    async with db_pool.acquire() as conn:
-        return await conn.fetchrow("SELECT id,message_id,title,content FROM posts WHERE message_id=$1", message_id)
-
-            
 
             # ذخیره هشتگ‌ها
             for tag in tags:
@@ -223,6 +218,13 @@ async def get_post_db_row_by_message_id(message_id: int):
                     """,
                     post_db_id, hid
                 )
+
+async def get_post_db_row_by_message_id(message_id: int):
+    async with db_pool.acquire() as conn:
+        return await conn.fetchrow(
+            "SELECT id,message_id,title,content FROM posts WHERE message_id=$1",
+            message_id
+        )
 
 
 # تابع گرفتن یا ساختن هشتگ
