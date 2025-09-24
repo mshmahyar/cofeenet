@@ -1,4 +1,3 @@
-# bot.py
 import os
 import re
 import asyncio
@@ -106,6 +105,12 @@ async def get_hashtags_for_post(post_db_id: int) -> list[str]:
         """, post_db_id)
         return [r["name"] for r in rows]
 
+# ----------------- تعداد پست در هر جستجو -----------------
+user_search_limit: dict[int,int] = {}  # chat_id -> تعداد پست
+
+def get_user_search_limit(chat_id: int) -> int:
+    return user_search_limit.get(chat_id, 5)  # پیش‌فرض 5 پست
+
 async def search_posts_by_keyword(keyword: str, limit: int = 5):
     kw = f"%{keyword}%"
     async with db_pool.acquire() as conn:
@@ -202,11 +207,13 @@ waiting_for_search: dict[int,bool] = {}
 async def cmd_start(msg: types.Message):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("🔍 جستجو اطلاعیه/خبر", "🔔 دریافت خودکار اطلاعیه/خبر")
+    kb.add("⚙️ تنظیمات")
     await msg.answer(
         "سلام، من ربات اطلاع‌رسانی کافی‌نت هستم. یکی از گزینه‌ها را انتخاب کن",
         reply_markup=kb
     )
 
+# --- جستجوی پست ---
 @dp.message_handler(lambda m: m.text=="🔍 جستجو اطلاعیه/خبر")
 async def start_search_flow(msg: types.Message):
     waiting_for_search[msg.chat.id] = True
@@ -215,7 +222,8 @@ async def start_search_flow(msg: types.Message):
 @dp.message_handler(lambda m: m.chat.id in waiting_for_search)
 async def handle_search_input(msg: types.Message):
     if not waiting_for_search.pop(msg.chat.id, None): return
-    results = await search_posts_by_keyword(msg.text.strip())
+    limit = get_user_search_limit(msg.chat.id)
+    results = await search_posts_by_keyword(msg.text.strip(), limit)
     if not results:
         await msg.answer("❌ موردی پیدا نشد.")
         return
@@ -224,6 +232,7 @@ async def handle_search_input(msg: types.Message):
         tags = await get_hashtags_for_post(row["id"]) if row else []
         await copy_post_to_user(msg.chat.id, CHANNEL_ID_INT, r["message_id"], tags)
 
+# --- منوی اشتراک ---
 @dp.message_handler(lambda m: m.text=="🔔 دریافت خودکار اطلاعیه/خبر")
 async def show_subscription_menu(msg: types.Message):
     all_tags = await get_all_hashtags()
@@ -262,7 +271,8 @@ async def callback_toggle_subscription(call: types.CallbackQuery):
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith("tag_search:"))
 async def callback_tag_search(call: types.CallbackQuery):
     tag = call.data.split("tag_search:")[1]
-    results = await search_posts_by_tag(tag)
+    limit = get_user_search_limit(call.from_user.id)
+    results = await search_posts_by_tag(tag, limit)
     if not results:
         await call.answer("هیچ پستی با این هشتگ پیدا نشد.", show_alert=True)
         return
@@ -271,6 +281,32 @@ async def callback_tag_search(call: types.CallbackQuery):
         row = await get_post_db_row_by_message_id(r["message_id"])
         tags = await get_hashtags_for_post(row["id"]) if row else []
         await copy_post_to_user(call.from_user.id, CHANNEL_ID_INT, r["message_id"], tags)
+
+# --- تنظیمات تعداد پست ---
+@dp.message_handler(lambda m: m.text=="⚙️ تنظیمات")
+async def show_settings_menu(msg: types.Message):
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(InlineKeyboardButton("🔢 تعداد پست در هر جستجو", callback_data="set_search_limit"))
+    await msg.answer("⚙️ تنظیمات ربات:", reply_markup=kb)
+
+@dp.callback_query_handler(lambda c: c.data=="set_search_limit")
+async def callback_set_search_limit(call: types.CallbackQuery):
+    await call.message.answer("لطفاً عدد موردنظر برای تعداد پست در هر جستجو را بفرستید (مثلاً 5):")
+    waiting_for_search[call.from_user.id] = "set_limit"
+    await call.answer()
+
+@dp.message_handler(lambda m: waiting_for_search.get(m.chat.id)=="set_limit")
+async def handle_set_search_limit(msg: types.Message):
+    try:
+        val = int(msg.text.strip())
+        if val < 1 or val > 50:
+            await msg.answer("❌ عدد باید بین 1 تا 50 باشد.")
+            return
+        user_search_limit[msg.chat.id] = val
+        await msg.answer(f"✅ تعداد پست در هر جستجو به {val} تغییر کرد.")
+        waiting_for_search.pop(msg.chat.id, None)
+    except ValueError:
+        await msg.answer("❌ لطفاً یک عدد معتبر وارد کنید.")
 
 # ----------------- startup/shutdown -----------------
 async def on_startup(dispatcher):
