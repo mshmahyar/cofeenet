@@ -71,32 +71,6 @@ async def set_search_limit(msg: types.Message):
     await msg.answer(f"✅ تعداد پست در جستجو روی {n} تنظیم شد")
 
 # ----------------- DB helpers -----------------
-async def get_or_create_hashtag(conn, name: str) -> int:
-    row = await conn.fetchrow("SELECT id FROM hashtags WHERE name=$1", name)
-    if row:
-        return row["id"]
-    rec = await conn.fetchrow("INSERT INTO hashtags(name) VALUES($1) RETURNING id", name)
-    return rec["id"]
-
-async def save_post_and_tags(message_id: int, title: str, content: str, tags: list[str]):
-    async with db_pool.acquire() as conn:
-        async with conn.transaction():
-            rec = await conn.fetchrow(
-                "INSERT INTO posts(message_id,title,content) VALUES($1,$2,$3) ON CONFLICT(message_id) DO NOTHING RETURNING id",
-                message_id, title, content
-            )
-            if rec:
-                post_db_id = rec["id"]
-            else:
-                rec2 = await conn.fetchrow("SELECT id FROM posts WHERE message_id=$1", message_id)
-                post_db_id = rec2["id"]
-
-            for tag in tags:
-                hid = await get_or_create_hashtag(conn, tag)
-                await conn.execute(
-                    "INSERT INTO post_hashtags(post_id, hashtag_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
-                    post_db_id, hid
-                )
 
             # حذف پست‌های قدیمی بیش از 1000
             total = await conn.fetchval("SELECT COUNT(*) FROM posts")
@@ -109,15 +83,7 @@ async def get_post_db_row_by_message_id(message_id: int):
     async with db_pool.acquire() as conn:
         return await conn.fetchrow("SELECT id,message_id,title,content FROM posts WHERE message_id=$1", message_id)
 
-async def get_hashtags_for_post(post_db_id: int) -> list[str]:
-    async with db_pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT h.name FROM hashtags h
-            JOIN post_hashtags ph ON ph.hashtag_id = h.id
-            WHERE ph.post_id=$1
-            ORDER BY h.name
-        """, post_db_id)
-        return [r["name"] for r in rows]
+
 
 # ----------------- تعداد پست در هر جستجو -----------------
 limit = user_search_limit.get(msg.chat.id, 5)
@@ -200,20 +166,90 @@ async def copy_post_to_user(user_id: int, from_chat_id: int, message_id: int, ta
         await bot.send_message(user_id, text)
 
 # ----------------- هندلر پست کانال -----------------
+# هندلر برای پست‌های کانال
 @dp.channel_post_handler(content_types=types.ContentTypes.ANY)
 async def channel_post_handler(message: types.Message):
     text = message.text or message.caption
-    if not text: return
+    if not text:
+        return
+
+    # شرط 📌 → اگر نمی‌خوای، این بخش رو کامنت کن
     first_line = text.splitlines()[0].strip()
-    if not first_line.startswith("📌"): return
+    if not first_line.startswith("📌"):
+        return
+
+    # عنوان و محتوا
     title = re.sub(r"^📌\s*", "", first_line).strip()
     content = "\n".join(text.splitlines()[1:]).strip()
+
+    # پیدا کردن هشتگ‌ها
     tags = re.findall(r"#\S+", text)
+
+    # ذخیره در دیتابیس
     await save_post_and_tags(message.message_id, title, content, tags)
+
+    # ارسال برای سابسکرایبرها
     for tag in tags:
         subs = await get_subscribers_for_hashtag(tag)
         for uid in set(subs):
             await copy_post_to_user(uid, CHANNEL_ID_INT, message.message_id, tags)
+
+# تابع ذخیره پست و تگ‌ها
+async def save_post_and_tags(message_id: int, title: str, content: str, tags: list[str]):
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            # ذخیره پست
+            rec = await conn.fetchrow(
+                """
+                INSERT INTO posts(message_id, title, content)
+                VALUES($1, $2, $3)
+                ON CONFLICT(message_id) DO UPDATE 
+                SET title=EXCLUDED.title, content=EXCLUDED.content
+                RETURNING id
+                """,
+                message_id, title, content
+            )
+            post_db_id = rec["id"]
+
+
+            # حذف پست‌های قدیمی بیش از 1000
+            total = await conn.fetchval("SELECT COUNT(*) FROM posts")
+            if total > 1000:
+                to_remove = await conn.fetch("SELECT id FROM posts ORDER BY created_at ASC LIMIT $1", total-1000)
+                for r in to_remove:
+                    await conn.execute("DELETE FROM posts WHERE id=$1", r["id"])
+
+async def get_post_db_row_by_message_id(message_id: int):
+    async with db_pool.acquire() as conn:
+        return await conn.fetchrow("SELECT id,message_id,title,content FROM posts WHERE message_id=$1", message_id)
+
+            
+
+            # ذخیره هشتگ‌ها
+            for tag in tags:
+                hid = await get_or_create_hashtag(conn, tag)
+                await conn.execute(
+                    """
+                    INSERT INTO post_hashtags(post_id, hashtag_id)
+                    VALUES($1, $2)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    post_db_id, hid
+                )
+
+
+# تابع گرفتن یا ساختن هشتگ
+async def get_or_create_hashtag(conn, tag: str) -> int:
+    rec = await conn.fetchrow(
+        """
+        INSERT INTO hashtags(name)
+        VALUES($1)
+        ON CONFLICT(name) DO UPDATE SET name=EXCLUDED.name
+        RETURNING id
+        """,
+        tag
+    )
+    return rec["id"]
 
 # ----------------- منو و جستجو -----------------
 @dp.message_handler(commands=["start"])
