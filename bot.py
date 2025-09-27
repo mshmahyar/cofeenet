@@ -279,14 +279,17 @@ async def get_or_create_hashtag(conn, tag: str) -> int:
 @dp.message_handler(commands=["start"])
 async def cmd_start(msg: types.Message):
     await ensure_user_exists(msg.from_user.id)
-        kb = ReplyKeyboardMarkup(resize_keyboard=True)
-        kb.add("🔍 جستجو اطلاعیه/خبر")
-        kb.add("🔔 دریافت خودکار اطلاعیه/خبر")
-        kb.add("⚙️ تنظیمات")
-        await msg.answer(
-            "سلام 👋\nخوش اومدی! از منوی زیر یکی رو انتخاب کن:",
-            reply_markup=kb
-        )
+
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add("🔍 جستجو اطلاعیه/خبر")
+    kb.add("🔔 دریافت خودکار اطلاعیه/خبر")
+    kb.add("⚙️ تنظیمات")
+
+    await msg.answer(
+        "سلام 👋\nخوش اومدی! از منوی زیر یکی رو انتخاب کن:",
+        reply_markup=kb
+    )
+
 
 @dp.message_handler(lambda m: m.text.isdigit())
 async def set_search_limit(msg: types.Message):
@@ -386,27 +389,26 @@ async def callback_view_post(call: types.CallbackQuery):
 
 
 # --- منوی اشتراک ---
-@dp.message_handler(lambda m: m.text and m.text.strip() == "🔔 دریافت خودکار اطلاعیه/خبر")
+@dp.message_handler(lambda m: m.text and "دریافت خودکار اطلاعیه" in m.text)
 async def show_subscription_menu(msg: types.Message):
-    # ثبت کاربر در دیتابیس اگر وجود نداشته باشد
-    await ensure_user_exists(msg.from_user.id)
+    user = await get_user_from_db(msg.from_user.id)
+    if not user:
+        await msg.answer("⚠️ لطفاً ابتدا /start را بزنید تا ثبت نام شوید.")
+        return
 
-    # گرفتن تمام هشتگ‌ها
     all_tags = await get_all_hashtags()
     if not all_tags:
         await msg.answer("هنوز هیچ هشتگی ثبت نشده است.")
         return
 
-    # گرفتن هشتگ‌های اشتراکی کاربر
     user_tags = await get_user_subscriptions(msg.from_user.id)
-
-    # ساخت کیبورد با وضعیت اشتراک‌ها
     kb = InlineKeyboardMarkup(row_width=2)
     for t in all_tags:
         status = "✅" if t in user_tags else "❌"
         kb.add(InlineKeyboardButton(f"{status} {t}", callback_data=f"toggle:{t}"))
 
     await msg.answer("📌 دسته‌های موجود:", reply_markup=kb)
+
 
 # --- هندلر callback برای تغییر اشتراک‌ها ---
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith("toggle:"))
