@@ -278,14 +278,15 @@ async def get_or_create_hashtag(conn, tag: str) -> int:
 # ----------------- منو و جستجو -----------------
 @dp.message_handler(commands=["start"])
 async def cmd_start(msg: types.Message):
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("🔍 جستجو اطلاعیه/خبر")
-    kb.add("🔔 دریافت خودکار اطلاعیه/خبر")
-    kb.add("⚙️ تنظیمات")
-    await msg.answer(
-        "سلام 👋\nخوش اومدی! از منوی زیر یکی رو انتخاب کن:",
-        reply_markup=kb
-    )
+    await ensure_user_exists(msg.from_user.id)
+        kb = ReplyKeyboardMarkup(resize_keyboard=True)
+        kb.add("🔍 جستجو اطلاعیه/خبر")
+        kb.add("🔔 دریافت خودکار اطلاعیه/خبر")
+        kb.add("⚙️ تنظیمات")
+        await msg.answer(
+            "سلام 👋\nخوش اومدی! از منوی زیر یکی رو انتخاب کن:",
+            reply_markup=kb
+        )
 
 @dp.message_handler(lambda m: m.text.isdigit())
 async def set_search_limit(msg: types.Message):
