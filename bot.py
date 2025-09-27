@@ -95,19 +95,7 @@ async def search_posts_by_keyword(keyword: str, limit: int = 5):
             LIMIT $2
         """, kw, limit)
 
-# هندلر برای سرچ
-@dp.message_handler()
-async def handle_search(msg: types.Message):
-    limit = get_user_search_limit(msg.chat.id)
-    results = await search_posts_by_keyword(msg.text.strip(), limit=limit)
 
-    if not results:
-        await msg.reply("❌ چیزی پیدا نشد.")
-    else:
-        text = "🔎 نتایج:\n\n"
-        for i, row in enumerate(results, 1):
-            text += f"{i}. {row['title']} (ID: {row['message_id']})\n"
-        await msg.reply(text)
 
 async def search_posts_by_tag(tag_name: str, limit: int = 5):
     async with db_pool.acquire() as conn:
