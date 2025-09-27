@@ -387,12 +387,19 @@ async def callback_view_post(call: types.CallbackQuery):
 # --- منوی اشتراک ---
 @dp.message_handler(lambda m: m.text and m.text.strip() == "🔔 دریافت خودکار اطلاعیه/خبر")
 async def show_subscription_menu(msg: types.Message):
+    # ثبت کاربر در دیتابیس اگر وجود نداشته باشد
+    await ensure_user_exists(msg.from_user.id)
+
+    # گرفتن تمام هشتگ‌ها
     all_tags = await get_all_hashtags()
     if not all_tags:
         await msg.answer("هنوز هیچ هشتگی ثبت نشده است.")
         return
 
+    # گرفتن هشتگ‌های اشتراکی کاربر
     user_tags = await get_user_subscriptions(msg.from_user.id)
+
+    # ساخت کیبورد با وضعیت اشتراک‌ها
     kb = InlineKeyboardMarkup(row_width=2)
     for t in all_tags:
         status = "✅" if t in user_tags else "❌"
@@ -400,10 +407,13 @@ async def show_subscription_menu(msg: types.Message):
 
     await msg.answer("📌 دسته‌های موجود:", reply_markup=kb)
 
-
+# --- هندلر callback برای تغییر اشتراک‌ها ---
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith("toggle:"))
 async def callback_toggle_subscription(call: types.CallbackQuery):
     tag = call.data.split("toggle:")[1]
+
+    # ثبت کاربر اگر هنوز ثبت نشده باشد
+    await ensure_user_exists(call.from_user.id)
 
     user_tags = await get_user_subscriptions(call.from_user.id)
 
@@ -414,7 +424,7 @@ async def callback_toggle_subscription(call: types.CallbackQuery):
         await add_subscription(call.from_user.id, tag)
         await call.answer(f"✅ اشتراک {tag} فعال شد")
 
-    # فقط بروزرسانی کیبورد، بدون تغییر متن پیام
+    # آپدیت کیبورد بدون تغییر متن پیام
     all_tags = await get_all_hashtags()
     user_tags = await get_user_subscriptions(call.from_user.id)
     kb = InlineKeyboardMarkup(row_width=2)
@@ -422,7 +432,6 @@ async def callback_toggle_subscription(call: types.CallbackQuery):
         status = "✅" if t in user_tags else "❌"
         kb.add(InlineKeyboardButton(f"{status} {t}", callback_data=f"toggle:{t}"))
 
-    # آپدیت کیبورد
     await call.message.edit_reply_markup(reply_markup=kb)
 
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith("tag_search:"))
