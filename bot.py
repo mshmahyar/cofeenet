@@ -23,10 +23,10 @@ waiting_for_keyword: dict[int, bool] = {}
 waiting_for_limit: dict[int, bool] = {}
 user_search_limit: dict[int, int] = {}
 
-@dp.callback_query_handler()
-async def debug_all_callbacks(call: types.CallbackQuery):
-    print("📥 Callback received:", call.data)
-    await call.answer("دکمه کلیک شد ✅")
+#@dp.callback_query_handler()
+#async def debug_all_callbacks(call: types.CallbackQuery):
+    #print("📥 Callback received:", call.data)
+    #await call.answer("دکمه کلیک شد ✅")
 
 # ----------------- DB pool -----------------
 db_pool: asyncpg.pool.Pool | None = None
@@ -76,7 +76,16 @@ async def set_search_limit(msg: types.Message):
     user_search_limit[msg.from_user.id] = n
     await msg.answer(f"✅ تعداد پست در جستجو روی {n} تنظیم شد")
 
-
+# --- ساخت دکمه‌های هشتگ ---
+def make_hashtag_buttons(tags: list[str]) -> InlineKeyboardMarkup:
+    """
+    ساخت کیبورد دکمه‌ای برای لیست هشتگ‌ها
+    هر هشتگ یک دکمه است که callback اش 'tag_search:<tag>' خواهد بود
+    """
+    kb = InlineKeyboardMarkup(row_width=3)
+    for t in tags:
+        kb.insert(InlineKeyboardButton(t, callback_data=f"tag_search:{t}"))
+    return kb
 
 # ----------------- تعداد پست در هر جستجو -----------------
 def get_user_search_limit(chat_id: int) -> int:
@@ -307,21 +316,39 @@ async def handle_search_input(msg: types.Message):
             continue
 
         tags = await get_hashtags_for_post(row["id"])
-        hashtags_text = " ".join(tags) if tags else ""
-
-        # لینک پست
         post_link = f"https://t.me/{CHANNEL_USERNAME}/{row['message_id']}"
 
         text = (
             f"📌 <b>{row['title']}</b>\n"
-            f"🔗 <a href='{post_link}'>مشاهده در کانال</a>\n"
-            f"{hashtags_text}"
+            f"🔗 <a href='{post_link}'>مشاهده در کانال</a>"
         )
 
         kb = InlineKeyboardMarkup()
         kb.add(InlineKeyboardButton("📖 متن کامل", callback_data=f"view:{row['message_id']}"))
 
+        # اضافه کردن دکمه‌های هشتگ‌ها (اگر وجود داشته باشند)
+        if tags:
+            for t in tags:
+                kb.add(InlineKeyboardButton(t, callback_data=f"tag_search:{t}"))
+
         await msg.answer(text, reply_markup=kb, parse_mode="HTML")
+
+
+# --- هندلر جستجو با هشتگ ---
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith("tag_search:"))
+async def callback_tag_search(call: types.CallbackQuery):
+    tag = call.data.split("tag_search:")[1]
+    limit = 5  # یا از get_user_search_limit(call.from_user.id) استفاده کن
+    results = await search_posts_by_tag(tag, limit)
+    if not results:
+        await call.answer("هیچ پستی با این هشتگ پیدا نشد.", show_alert=True)
+        return
+
+    await call.answer(f"در حال ارسال {len(results)} پست اخیر با {tag} ...")
+    for r in results:
+        row = await get_post_db_row_by_message_id(r["message_id"])
+        tags = await get_hashtags_for_post(row["id"]) if row else []
+        await copy_post_to_user(call.from_user.id, CHANNEL_ID_INT, r["message_id"], tags)
 
 # =======================================
 # هندلر نمایش متن کامل
