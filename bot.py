@@ -76,6 +76,12 @@ async def set_search_limit(msg: types.Message):
     user_search_limit[msg.from_user.id] = n
     await msg.answer(f"✅ تعداد پست در جستجو روی {n} تنظیم شد")
 
+async def ensure_user_exists(user_id: int):
+    user = await get_user_from_db(user_id)
+    if not user:
+        await add_user_to_db(user_id)
+
+
 # --- ساخت دکمه‌های هشتگ ---
 def make_hashtag_buttons(tags: list[str]) -> InlineKeyboardMarkup:
     """
