@@ -378,30 +378,29 @@ async def callback_view_post(call: types.CallbackQuery):
         await copy_post_to_user(msg.chat.id, CHANNEL_ID_INT, r["message_id"], tags)
 
 
-
-
-
-
-
-
-
 # --- منوی اشتراک ---
-@dp.message_handler(lambda m: m.text=="🔔 دریافت خودکار اطلاعیه/خبر")
+@dp.message_handler(lambda m: m.text and m.text.strip() == "🔔 دریافت خودکار اطلاعیه/خبر")
 async def show_subscription_menu(msg: types.Message):
     all_tags = await get_all_hashtags()
     if not all_tags:
         await msg.answer("هنوز هیچ هشتگی ثبت نشده است.")
         return
+
     user_tags = await get_user_subscriptions(msg.from_user.id)
     kb = InlineKeyboardMarkup(row_width=2)
     for t in all_tags:
         status = "✅" if t in user_tags else "❌"
         kb.add(InlineKeyboardButton(f"{status} {t}", callback_data=f"toggle:{t}"))
+
     await msg.answer("📌 دسته‌های موجود:", reply_markup=kb)
+
+
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith("toggle:"))
 async def callback_toggle_subscription(call: types.CallbackQuery):
     tag = call.data.split("toggle:")[1]
+
     user_tags = await get_user_subscriptions(call.from_user.id)
+
     if tag in user_tags:
         await remove_subscription(call.from_user.id, tag)
         await call.answer(f"❌ اشتراک {tag} لغو شد")
@@ -409,7 +408,7 @@ async def callback_toggle_subscription(call: types.CallbackQuery):
         await add_subscription(call.from_user.id, tag)
         await call.answer(f"✅ اشتراک {tag} فعال شد")
 
-    # update فقط کیبورد
+    # فقط بروزرسانی کیبورد، بدون تغییر متن پیام
     all_tags = await get_all_hashtags()
     user_tags = await get_user_subscriptions(call.from_user.id)
     kb = InlineKeyboardMarkup(row_width=2)
@@ -417,12 +416,8 @@ async def callback_toggle_subscription(call: types.CallbackQuery):
         status = "✅" if t in user_tags else "❌"
         kb.add(InlineKeyboardButton(f"{status} {t}", callback_data=f"toggle:{t}"))
 
+    # آپدیت کیبورد
     await call.message.edit_reply_markup(reply_markup=kb)
-
-    try:
-        await call.message.edit_text("📌 دسته‌های موجود:", reply_markup=kb)
-    except:
-        await call.message.answer("منوی اشتراک‌ها به‌روز شد.", reply_markup=kb)
 
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith("tag_search:"))
 async def callback_tag_search(call: types.CallbackQuery):
