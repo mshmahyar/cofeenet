@@ -276,10 +276,11 @@ async def get_or_create_hashtag(conn, tag: str) -> int:
 @dp.message_handler(commands=["start"])
 async def cmd_start(msg: types.Message):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("🔍 جستجو اطلاعیه/خبر", "🔔 دریافت خودکار اطلاعیه/خبر")
+    kb.add("🔍 جستجو اطلاعیه/خبر")
+    kb.add("🔔 دریافت خودکار اطلاعیه/خبر")
     kb.add("⚙️ تنظیمات")
     await msg.answer(
-        "سلام، من ربات اطلاع‌رسانی کافی‌نت هستم. یکی از گزینه‌ها را انتخاب کن",
+        "سلام 👋\nخوش اومدی! از منوی زیر یکی رو انتخاب کن:",
         reply_markup=kb
     )
 
@@ -298,10 +299,57 @@ async def start_search_flow(msg: types.Message):
     waiting_for_keyword[msg.chat.id] = True
     await msg.answer("🔎 لطفاً کلیدواژهٔ جستجو را بفرست (جستجو فقط در عنوان‌ها انجام خواهد شد):")
 
+# ===============================
+# هندلر نمایش متن جستجو
+#================================
 @dp.message_handler(lambda m: m.chat.id in waiting_for_keyword)
 async def handle_search_input(msg: types.Message):
     if not waiting_for_keyword.pop(msg.chat.id, None):
         return
+
+    limit = user_search_limit.get(msg.chat.id, 5)
+    results = await search_posts_by_keyword(msg.text.strip(), limit=limit)
+    if not results:
+        await msg.answer("❌ موردی پیدا نشد.")
+        return
+
+    for r in results:
+        row = await get_post_db_row_by_message_id(r["message_id"])
+        if not row:
+            continue
+
+        tags = await get_hashtags_for_post(row["id"])
+        hashtags_text = " ".join(tags) if tags else ""
+
+        # لینک پست
+        post_link = f"https://t.me/{CHANNEL_USERNAME}/{row['message_id']}"
+
+        text = (
+            f"📌 <b>{row['title']}</b>\n"
+            f"🔗 <a href='{post_link}'>مشاهده در کانال</a>\n"
+            f"{hashtags_text}"
+        )
+
+        kb = InlineKeyboardMarkup()
+        kb.add(InlineKeyboardButton("📖 متن کامل", callback_data=f"view:{row['message_id']}"))
+
+        await msg.answer(text, reply_markup=kb, parse_mode="HTML")
+
+# =======================================
+# هندلر نمایش متن کامل
+# =======================================
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith("view:"))
+async def callback_view_post(call: types.CallbackQuery):
+    msg_id = int(call.data.split("view:")[1])
+    row = await get_post_db_row_by_message_id(msg_id)
+    if not row:
+        await call.answer("❌ پست پیدا نشد.", show_alert=True)
+        return
+
+    text = f"📌 <b>{row['title']}</b>\n\n{row['content']}"
+    await call.message.answer(text, parse_mode="HTML")
+    await call.answer()
+
 
     limit = user_search_limit.get(msg.chat.id, 5)
     results = await search_posts_by_keyword(msg.text.strip(), limit=limit)
