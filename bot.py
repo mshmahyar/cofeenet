@@ -159,33 +159,48 @@ async def get_hashtags_for_post(post_db_id: int) -> list[str]:
         """, post_db_id)
         return [r["name"] for r in rows]
 
+# اضافه کردن اشتراک
 async def add_subscription(user_id: int, tag_name: str):
     async with db_pool.acquire() as conn:
         async with conn.transaction():
-            tag = await conn.fetchrow("SELECT id FROM hashtags WHERE name=$1", tag_name)
-            tag_id = tag["id"] if tag else (await conn.fetchrow("INSERT INTO hashtags(name) VALUES($1) RETURNING id", tag_name))["id"]
-            await conn.execute("INSERT INTO subscriptions(user_id,hashtag_id) VALUES($1,$2) ON CONFLICT DO NOTHING", user_id, tag_id)
+            tag_row = await conn.fetchrow("SELECT id FROM hashtags WHERE name=$1", tag_name)
+            tag_id = tag_row["id"] if tag_row else await get_or_create_hashtag(conn, tag_name)
+            await conn.execute("""
+                INSERT INTO subscriptions (user_id, hashtag_id)
+                VALUES ($1, $2)
+                ON CONFLICT (user_id, hashtag_id) DO NOTHING
+            """, user_id, tag_id)
 
+# remove_subscription
 async def remove_subscription(user_id: int, tag_name: str):
     async with db_pool.acquire() as conn:
         tag = await conn.fetchrow("SELECT id FROM hashtags WHERE name=$1", tag_name)
         if tag:
             await conn.execute("DELETE FROM subscriptions WHERE user_id=$1 AND hashtag_id=$2", user_id, tag["id"])
 
+
+# get_user_subscriptions
 async def get_user_subscriptions(user_id: int) -> list[str]:
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT h.name FROM hashtags h
-            JOIN subscriptions s ON s.hashtag_id=h.id
+            SELECT h.name FROM subscriptions s
+            JOIN hashtags h ON h.id = s.hashtag_id
             WHERE s.user_id=$1
             ORDER BY h.name
         """, user_id)
         return [r["name"] for r in rows]
 
-async def get_all_hashtags() -> list[str]:
+
+# get_subscribers_for_hashtag
+async def get_subscribers_for_hashtag(tag_name: str) -> list[int]:
     async with db_pool.acquire() as conn:
-        rows = await conn.fetch("SELECT name FROM hashtags ORDER BY name")
-        return [r["name"] for r in rows]
+        rows = await conn.fetch("""
+            SELECT s.user_id FROM subscriptions s
+            JOIN hashtags h ON h.id = s.hashtag_id
+            WHERE h.name=$1
+        """, tag_name)
+        return [r["user_id"] for r in rows]
+
 
 async def get_subscribers_for_hashtag(tag_name: str) -> list[int]:
     async with db_pool.acquire() as conn:
@@ -287,16 +302,13 @@ async def get_post_db_row_by_message_id(message_id: int):
 
 
 # تابع گرفتن یا ساختن هشتگ
-async def get_or_create_hashtag(conn, tag: str) -> int:
-    rec = await conn.fetchrow(
-        """
+async def get_or_create_hashtag(conn, tag_name: str) -> int:
+    rec = await conn.fetchrow("""
         INSERT INTO hashtags(name)
         VALUES($1)
         ON CONFLICT(name) DO UPDATE SET name=EXCLUDED.name
         RETURNING id
-        """,
-        tag
-    )
+    """, tag_name)
     return rec["id"]
 
 # ----------------- منو و جستجو -----------------
