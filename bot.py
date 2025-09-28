@@ -325,7 +325,7 @@ async def cmd_start(msg: types.Message):
     await msg.answer("سلام 👋\nمنو را انتخاب کنید:", reply_markup=main_menu_keyboard())
 
 # ----------------- هندلر ثبت‌نام -----------------
-@dp.message_handler(lambda m: m.text == "📝 ثبت نام")
+@dp.message_handler(lambda m: m.text and "ثبت" in m.text and "نام" in m.text)
 async def register_user(msg: types.Message):
     async with db_pool.acquire() as conn:
         # بررسی وجود کاربر
@@ -345,6 +345,7 @@ async def register_user(msg: types.Message):
             msg.from_user.first_name or ""
         )
         await msg.answer("🎉 ثبت‌نام شما با موفقیت انجام شد!")
+
 
 
 
