@@ -561,6 +561,7 @@ async def callback_view_post(call: types.CallbackQuery):
 
 
 # --- منوی اشتراک ---
+# نمایش منوی اشتراک
 @dp.message_handler(lambda m: m.text == "🔔 دریافت خودکار اطلاعیه/خبر")
 async def show_subscription_menu(msg: types.Message):
     async with db_pool.acquire() as conn:
@@ -571,7 +572,7 @@ async def show_subscription_menu(msg: types.Message):
             return
 
         # دریافت تمام هشتگ‌ها
-        all_tags = await conn.fetch("SELECT name FROM hashtags ORDER BY name")
+        all_tags = await conn.fetch("SELECT id, name FROM hashtags ORDER BY name")
         if not all_tags:
             await msg.answer("هنوز هیچ هشتگی ثبت نشده است.")
             return
@@ -579,80 +580,66 @@ async def show_subscription_menu(msg: types.Message):
         # دریافت هشتگ‌های سابسکرایب‌شده کاربر
         user_tags_rows = await conn.fetch(
             """
-            SELECT h.name
-            FROM subscriptions s
-            JOIN hashtags h ON h.id = s.hashtag_id
-            WHERE s.user_id=$1
+            SELECT hashtag_id
+            FROM subscriptions
+            WHERE user_id=$1
             """,
             msg.from_user.id
         )
-        user_tags = [r["name"] for r in user_tags_rows]
+        user_tags = {r["hashtag_id"] for r in user_tags_rows}
 
     # ساخت کیبورد شیشه‌ای
     kb = InlineKeyboardMarkup(row_width=2)
     for t in all_tags:
-        status = "✅" if t["name"] in user_tags else "❌"
-        kb.add(InlineKeyboardButton(f"{status} {t['name']}", callback_data=f"toggle:{t['name']}"))
+        status = "✅" if t["id"] in user_tags else "❌"
+        kb.insert(InlineKeyboardButton(f"{status} {t['name']}", callback_data=f"toggle:{t['id']}"))
+
+    kb.add(InlineKeyboardButton("ثبت نهایی ✅", callback_data="register"))
 
     await msg.answer("📌 دسته‌های موجود:", reply_markup=kb)
 
 
-# --- توگل کردن اشتراک ---
-@dp.callback_query_handler(lambda c: c.data and c.data.startswith("toggle:"))
-async def callback_toggle_subscription(call: types.CallbackQuery):
-    tag = call.data.split("toggle:")[1]
+# هندلر تغییر وضعیت هشتگ‌ها
+@dp.callback_query_handler(lambda c: c.data.startswith("toggle:"))
+async def toggle_subscription(callback: types.CallbackQuery):
+    tag_id = int(callback.data.split(":")[1])
+    user_id = callback.from_user.id
 
     async with db_pool.acquire() as conn:
-        # بررسی ثبت‌نام
-        user = await conn.fetchrow("SELECT user_id FROM users WHERE user_id=$1", call.from_user.id)
-        if not user:
-            await call.answer("⚠️ لطفاً ابتدا در ربات ثبت‌نام کنید.", show_alert=True)
-            return
-
-        # دریافت id هشتگ
-        tag_row = await conn.fetchrow("SELECT id FROM hashtags WHERE name=$1", tag)
-        if not tag_row:
-            await call.answer("❌ هشتگ پیدا نشد.", show_alert=True)
-            return
-        tag_id = tag_row["id"]
-
-        # بررسی وجود اشتراک
-        sub_row = await conn.fetchrow(
-            "SELECT * FROM subscriptions WHERE user_id=$1 AND hashtag_id=$2",
-            call.from_user.id, tag_id
+        exists = await conn.fetchrow(
+            "SELECT 1 FROM subscriptions WHERE user_id=$1 AND hashtag_id=$2",
+            user_id, tag_id
         )
-
-        if sub_row:
-            # لغو اشتراک
-            await conn.execute("DELETE FROM subscriptions WHERE user_id=$1 AND hashtag_id=$2", call.from_user.id, tag_id)
-            await call.answer(f"❌ اشتراک {tag} لغو شد")
-        else:
-            # اضافه کردن اشتراک
+        if exists:
             await conn.execute(
-                "INSERT INTO subscriptions(user_id, hashtag_id, subscribed_at) VALUES($1,$2,NOW())",
-                call.from_user.id, tag_id
+                "DELETE FROM subscriptions WHERE user_id=$1 AND hashtag_id=$2",
+                user_id, tag_id
             )
-            await call.answer(f"✅ اشتراک {tag} فعال شد")
+        else:
+            await conn.execute(
+                "INSERT INTO subscriptions (user_id, hashtag_id) VALUES ($1, $2)",
+                user_id, tag_id
+            )
 
-        # آپدیت کیبورد
-        all_tags = await conn.fetch("SELECT name FROM hashtags ORDER BY name")
+        # دریافت مجدد وضعیت هشتگ‌ها
+        all_tags = await conn.fetch("SELECT id, name FROM hashtags ORDER BY name")
         user_tags_rows = await conn.fetch(
-            """
-            SELECT h.name
-            FROM subscriptions s
-            JOIN hashtags h ON h.id = s.hashtag_id
-            WHERE s.user_id=$1
-            """,
-            call.from_user.id
+            "SELECT hashtag_id FROM subscriptions WHERE user_id=$1", user_id
         )
-        user_tags = [r["name"] for r in user_tags_rows]
+        user_tags = {r["hashtag_id"] for r in user_tags_rows}
 
+    # بازسازی کیبورد
     kb = InlineKeyboardMarkup(row_width=2)
     for t in all_tags:
-        status = "✅" if t["name"] in user_tags else "❌"
-        kb.add(InlineKeyboardButton(f"{status} {t['name']}", callback_data=f"toggle:{t['name']}"))
+        status = "✅" if t["id"] in user_tags else "❌"
+        kb.insert(InlineKeyboardButton(f"{status} {t['name']}", callback_data=f"toggle:{t['id']}"))
 
-    await call.message.edit_reply_markup(reply_markup=kb)
+    kb.add(InlineKeyboardButton("ثبت نهایی ✅", callback_data="register"))
+
+    # فقط منو رو آپدیت کن
+    await callback.message.edit_reply_markup(reply_markup=kb)
+    await callback.answer()
+
 
 
 
