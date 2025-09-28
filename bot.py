@@ -53,7 +53,29 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     hashtag_id INTEGER REFERENCES hashtags(id) ON DELETE CASCADE,
     PRIMARY KEY (user_id, hashtag_id)
 );
+-- توی PostgreSQL اجرا کن
+CREATE TABLE IF NOT EXISTS users (
+    user_id BIGINT PRIMARY KEY,
+    username TEXT,
+    first_name TEXT,
+    created_at TIMESTAMP DEFAULT now()
+);
 """
+async def get_user_from_db(user_id: int):
+    async with db_pool.acquire() as conn:
+        return await conn.fetchrow("SELECT * FROM users WHERE user_id=$1", user_id)
+
+async def add_user_to_db(user_id: int, username: str = None, first_name: str = None):
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO users (user_id, username, first_name)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id) DO NOTHING
+            """,
+            user_id, username, first_name
+        )
+
 
 async def init_db():
     global db_pool
@@ -76,10 +98,12 @@ async def set_search_limit(msg: types.Message):
     user_search_limit[msg.from_user.id] = n
     await msg.answer(f"✅ تعداد پست در جستجو روی {n} تنظیم شد")
 
-async def ensure_user_exists(user_id: int):
-    user = await get_user_from_db(user_id)
-    if not user:
-        await add_user_to_db(user_id)
+async def ensure_user_exists(user: types.User):
+    u = await get_user_from_db(user.id)
+    if not u:
+        await add_user_to_db(user.id, user.username, user.first_name)
+
+
 
 
 # --- ساخت دکمه‌های هشتگ ---
