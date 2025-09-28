@@ -378,6 +378,72 @@ async def handle_search_input(msg: types.Message):
                 kb.add(InlineKeyboardButton(t, callback_data=f"tag_search:{t}"))
 
         await msg.answer(text, reply_markup=kb, parse_mode="HTML")
+        
+# ==============================
+# اشتراک
+# ==============================
+@dp.callback_query_handler(lambda c: c.data.startswith("subscribe:"))
+async def subscribe_to_hashtag(callback: types.CallbackQuery):
+    hashtag = callback.data.split(":")[1]
+    user_id = callback.from_user.id
+
+    # 1. اطمینان از وجود هشتگ در جدول hashtags
+    async with db.acquire() as conn:
+        hashtag_id = await conn.fetchval(
+            """
+            INSERT INTO hashtags (name)
+            VALUES ($1)
+            ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+            RETURNING id;
+            """,
+            hashtag,
+        )
+
+        # 2. ذخیره اشتراک (اگر از قبل وجود نداشته باشه)
+        await conn.execute(
+            """
+            INSERT INTO subscriptions (user_id, hashtag_id, subscribed_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT DO NOTHING;
+            """,
+            user_id,
+            hashtag_id,
+        )
+
+    await callback.answer(f"✅ شما به #{hashtag} مشترک شدید.", show_alert=True)
+
+# ========================
+# لغو اشتراک
+# ========================
+@dp.callback_query_handler(lambda c: c.data.startswith("unsubscribe:"))
+async def unsubscribe_from_hashtag(callback: types.CallbackQuery):
+    hashtag = callback.data.split(":")[1]
+    user_id = callback.from_user.id
+
+    async with db.acquire() as conn:
+        # اول id هشتگ رو پیدا می‌کنیم
+        hashtag_id = await conn.fetchval(
+            "SELECT id FROM hashtags WHERE name = $1",
+            hashtag
+        )
+
+        if hashtag_id:
+            # حذف از subscriptions
+            result = await conn.execute(
+                """
+                DELETE FROM subscriptions
+                WHERE user_id = $1 AND hashtag_id = $2
+                """,
+                user_id,
+                hashtag_id
+            )
+
+            if result.endswith("DELETE 1"):
+                await callback.answer(f"❌ اشتراک #{hashtag} لغو شد.", show_alert=True)
+            else:
+                await callback.answer(f"⚠️ شما قبلاً مشترک #{hashtag} نبودید.", show_alert=True)
+        else:
+            await callback.answer(f"❌ هشتگ #{hashtag} پیدا نشد.", show_alert=True)
 
 
 # --- هندلر جستجو با هشتگ ---
