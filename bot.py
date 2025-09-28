@@ -435,49 +435,63 @@ async def callback_toggle_subscription(call: types.CallbackQuery):
         tag = call.data.split("toggle:")[1]
 
         async with db_pool.acquire() as conn:
+            # بررسی وجود کاربر
             user = await conn.fetchrow("SELECT user_id FROM users WHERE user_id=$1", call.from_user.id)
             if not user:
                 await call.answer("⚠️ لطفاً ابتدا ثبت‌نام کنید.", show_alert=True)
                 return
 
+            # پیدا کردن هشتگ
             tag_row = await conn.fetchrow("SELECT id FROM hashtags WHERE name=$1", tag)
             if not tag_row:
                 await call.answer("❌ هشتگ پیدا نشد.", show_alert=True)
                 return
             tag_id = tag_row["id"]
 
+            # بررسی اشتراک فعلی
             sub_row = await conn.fetchrow(
-                "SELECT * FROM subscriptions WHERE user_id=$1 AND hashtag_id=$2",
+                "SELECT 1 FROM subscriptions WHERE user_id=$1 AND hashtag_id=$2",
                 call.from_user.id, tag_id
             )
 
             if sub_row:
-                await conn.execute("DELETE FROM subscriptions WHERE user_id=$1 AND hashtag_id=$2", call.from_user.id, tag_id)
+                await conn.execute(
+                    "DELETE FROM subscriptions WHERE user_id=$1 AND hashtag_id=$2",
+                    call.from_user.id, tag_id
+                )
                 await call.answer(f"❌ اشتراک {tag} لغو شد")
             else:
-                await conn.execute("INSERT INTO subscriptions(user_id, hashtag_id, subscribed_at) VALUES($1,$2,NOW())", call.from_user.id, tag_id)
+                await conn.execute(
+                    "INSERT INTO subscriptions(user_id, hashtag_id, subscribed_at) VALUES($1,$2,NOW())",
+                    call.from_user.id, tag_id
+                )
                 await call.answer(f"✅ اشتراک {tag} فعال شد")
 
+            # همه هشتگ‌ها
             all_tags = await conn.fetch("SELECT name FROM hashtags ORDER BY name")
+
+            # هشتگ‌های فعال کاربر
             user_tags_rows = await conn.fetch(
                 "SELECT h.name FROM subscriptions s JOIN hashtags h ON h.id = s.hashtag_id WHERE s.user_id=$1",
                 call.from_user.id
             )
-            user_tags = [r["name"] for r in user_tags_rows]
+            user_tags = {r["name"] for r in user_tags_rows}
 
+            # ساخت کیبورد
             kb = InlineKeyboardMarkup(row_width=2)
             for t in all_tags:
-                tag_name = t["name"]  # ✅ فقط مقدار name
+                tag_name = t["name"]  # اینجا فقط name رو می‌گیریم
                 status = "✅" if tag_name in user_tags else "❌"
                 kb.add(InlineKeyboardButton(f"{status} {tag_name}", callback_data=f"toggle:{tag_name}"))
 
+            # بروزرسانی همون پیام
             await call.message.edit_reply_markup(reply_markup=kb)
-
 
     except Exception as e:
         await call.answer(f"❌ خطا: {e}", show_alert=True)
         import traceback
         traceback.print_exc()
+
 
 
     # بروزرسانی کیبورد
