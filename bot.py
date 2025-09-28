@@ -325,7 +325,7 @@ async def cmd_start(msg: types.Message):
     await msg.answer("سلام 👋\nمنو را انتخاب کنید:", reply_markup=main_menu_keyboard())
 
 # ----------------- هندلر ثبت‌نام -----------------
-@dp.message_handler(lambda m: m.text == "📝 ثبت‌نام در ربات")
+@dp.message_handler(lambda m: m.text == "📝 ثبت نام")
 async def register_user(msg: types.Message):
     async with db_pool.acquire() as conn:
         # بررسی وجود کاربر
@@ -464,12 +464,14 @@ async def callback_toggle_subscription(call: types.CallbackQuery):
             )
             user_tags = [r["name"] for r in user_tags_rows]
 
-        kb = InlineKeyboardMarkup(row_width=2)
-        for t in all_tags:
-            status = "✅" if t["name"] in user_tags else "❌"
-            kb.add(InlineKeyboardButton(f"{status} {t['name']}", callback_data=f"toggle:{t['name']}"))
+            kb = InlineKeyboardMarkup(row_width=2)
+            for t in all_tags:
+                tag_name = t["name"]  # ✅ فقط مقدار name
+                status = "✅" if tag_name in user_tags else "❌"
+                kb.add(InlineKeyboardButton(f"{status} {tag_name}", callback_data=f"toggle:{tag_name}"))
 
-        await call.message.edit_reply_markup(reply_markup=kb)
+            await call.message.edit_reply_markup(reply_markup=kb)
+
 
     except Exception as e:
         await call.answer(f"❌ خطا: {e}", show_alert=True)
