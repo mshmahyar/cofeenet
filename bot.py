@@ -5,8 +5,9 @@ import asyncpg
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import StatesGroup, State
+from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters.state import State, StatesGroup
+
 
 class ServiceOrder(StatesGroup):
     waiting_for_docs = State()
@@ -16,6 +17,7 @@ class AddService(StatesGroup):
     waiting_for_category = State()
     waiting_for_title = State()
     waiting_for_documents = State()
+    waiting_for_price = State()
 
 
 # ----------------- تنظیمات از ENV -----------------
@@ -869,15 +871,16 @@ async def add_service_title(msg: types.Message, state: FSMContext):
 # ثبت خدمت
 # ========================
 @dp.message_handler(state=AddService.waiting_for_documents)
-async def add_service_documents(msg: types.Message, state: FSMContext):
-    data = await state.get_data()
-    await db.execute(
-        "INSERT INTO services (category_id, title, required_documents) VALUES ($1,$2,$3)",
-        data["category_id"], data["title"], msg.text.strip()
-    )
-    await state.finish()
-    await msg.answer("✅ خدمت با موفقیت ثبت شد.", reply_markup=main_menu(True))
+async def add_service_docs(message: types.Message, state: FSMContext):
+    await state.update_data(documents=message.text.strip())
+    await message.answer("💰 هزینه تقریبی خدمت را وارد کنید (به تومان):")
+    await AddService.waiting_for_price.set()
 
+@dp.message_handler(state=AddService.waiting_for_documents)
+async def add_service_docs(message: types.Message, state: FSMContext):
+    await state.update_data(documents=message.text.strip())
+    await message.answer("💰 هزینه تقریبی خدمت را وارد کنید (به تومان):")
+    await AddService.waiting_for_price.set()
 
 
 # --- تنظیمات تعداد پست ---
