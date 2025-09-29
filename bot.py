@@ -397,22 +397,28 @@ async def get_or_create_hashtag(conn, tag_name: str) -> int:
     return rec["id"]
 
 # ----------------- منو و جستجو -----------------
-def main_menu_keyboard():
+def main_menu_keyboard(user_id=None):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("🔍 جستجو اطلاعیه/خبر"))
     kb.add(KeyboardButton("🔔 دریافت خودکار اطلاعیه/خبر"))
     kb.add(KeyboardButton("⚙️ تنظیمات"))
     kb.add(KeyboardButton("🛠 سفارش خدمات"))
     kb.add(KeyboardButton("📝 ثبت نام"))  # دکمه ثبت نام
-    if is_admin:
-        kb.add("⚙️ مدیریت")
+
+    # اگه کاربر ادمین باشه، دکمه مدیریت رو اضافه کن
+    if user_id in ADMINS:
+        kb.add(KeyboardButton("⚙️ مدیریت"))
+
     return kb
+
 
 @dp.message_handler(commands=["start"])
 async def cmd_start(msg: types.Message):
-    is_admin = msg.from_user.id in ADMINS
-    await msg.answer("سلام 👋\nمنو را انتخاب کنید:", reply_markup=main_menu_keyboard())
-
+    await msg.answer(
+        "سلام 👋\nمنو را انتخاب کنید:",
+        reply_markup=main_menu_keyboard(msg.from_user.id)
+    )
+    
 # ----------------- هندلر ثبت‌نام -----------------
 @dp.message_handler(lambda m: m.text and "ثبت" in m.text and "نام" in m.text)
 async def register_user(msg: types.Message):
