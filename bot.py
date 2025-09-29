@@ -154,6 +154,23 @@ async def init_db():
 
 user_search_limit: dict[int,int] = {}
 
+# گرفتن دسته‌بندی‌ها
+async def get_all_categories():
+    async with db_pool.acquire() as conn:
+        return await conn.fetch("SELECT id, name FROM service_categories ORDER BY name")
+
+# افزودن خدمت جدید
+async def add_service_to_db(category_name, title, documents, price):
+    async with db_pool.acquire() as conn:
+        category = await conn.fetchrow("SELECT id FROM service_categories WHERE name=$1", category_name)
+        if not category:
+            raise ValueError("دسته‌بندی یافت نشد!")
+        await conn.execute(
+            "INSERT INTO services (category_id, title, documents, price) VALUES ($1, $2, $3, $4)",
+            category["id"], title, documents, price
+        )
+
+
 @dp.message_handler(lambda m: m.text.isdigit())
 async def set_search_limit(msg: types.Message):
     n = int(msg.text.strip())
