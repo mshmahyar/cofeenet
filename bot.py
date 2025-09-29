@@ -7,7 +7,6 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.dispatcher import FSMContext
-from aiogram.contrib.fsm_storage.base import BaseStorage
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from fsm_storage_postgres import PostgresStorage
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
