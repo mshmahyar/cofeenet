@@ -5,12 +5,20 @@ import asyncpg
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import StatesGroup, State
+
+class ServiceOrder(StatesGroup):
+    waiting_for_docs = State()
+    waiting_for_confirmation = State()
+
 
 # ----------------- تنظیمات از ENV -----------------
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 CHANNEL_ID = os.getenv("CHANNEL_ID", "").strip()
 CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "").strip()  # اختیاری
+ADMIN_CHAT_ID = 123456789
 
 if not BOT_TOKEN or not DATABASE_URL or not CHANNEL_ID:
     raise RuntimeError("لطفاً BOT_TOKEN, DATABASE_URL و CHANNEL_ID را در ENV ست کنید.")
@@ -61,6 +69,56 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMP DEFAULT now()
 );
 """
+
+SERVICES = {
+    "خدمات خودرو": [
+        "ثبت نام ایران خودرو", "ثبت نام سایپا", "ثبت نام بهمن موتور", "دیگر ثبت نام ها",
+        "وکالتی کردن حساب", "استعلام قرعه کشی", "پرداخت مبلغ", "بیمه خودرو", "دیگر خدمات خودرویی"
+    ],
+    "خدمات کنکور": [
+        "ثبت نام کنکور", "انتخاب رشته", "نتایج کنکور"
+    ],
+    "خدمات دانشگاه": [
+        "ثبت نام دانشگاه", "تاییدیه تحصیلی", "سلامت روان", "نمونه سوال",
+        "پروژه دانشجویی", "پایان نامه", "سامانه سجاد", "کارت ورود به جلسه",
+        "دیگر خدمات دانشگاهی"
+    ],
+    "خدمات سجام و بورس": [
+        "ثبت نام سجام", "سهام متوفیان", "سهام نوزاد", "سهام عدالت", "ثبت نام کارگزاری",
+        "دیگر خدمات بورسی"
+    ],
+    "خدمات مالیاتی و اظهارنامه": [
+        "اظهار نامه حقوقی", "اظهارنامه حقیقی", "اظهارنامه شراکتی", "اظهار نامه اجاره",
+        "اظهارنامه ارزش افزوده", "مالیات خودرو", "مالیات بر ارث", "رفع مسدودی حساب متوفی",
+        "دیگر خدمات مالیاتی"
+    ],
+    "ثبت نام وام": [
+        "وام ازدواج", "وام فرزند", "وام مسکن", "وام اجاره (ودیعه)", "وام اشتغال", "دیگر وام ها"
+    ],
+    "خدمات ابلاغیه و ثنا": [
+        "دریافت ابلاغیه", "اطلاع رسانی روند پرونده", "نوبت گیری قضایی",
+        "پرداخت خدمات قضایی", "ثبت نام ثنا", "برگ ثتا", "تغییر رمز شخصی و موقت",
+        "گواهی سوء پیشینه", "دیگر خدمات قضایی"
+    ],
+    "خدمات سخا و تعویض پلاک": [
+        "ثبت نام سخا", "ثبت و احراز کد پستی", "خدمات نظام وظیفه",
+        "استعلام کارت سوخت و پایان خدمت", "نوبت گیری تعویض پلاک", "نوبت گیری خدمات خودرو",
+        "پرداخت مالیات و خلافی", "پرداخت عوارض", "وام سربازی", "دیگر خدمات انتظامی"
+    ],
+    "سامانه املاک و اجاره نامه": [
+        "ثبت ملک", "ثبت محل اقامت", "ثبت اجاره نامه", "ثبت خرید و فروش",
+        "ثبت نام وام ودیعه", "دیگر خدمات مسکن"
+    ],
+    "خدمات بیمه و تامین اجتماعی": [
+        "ثبت نام تامین اجتماعی", "سوابق بیمه", "فیش حقوقی", "فیش بیمه",
+        "گواهی کسر از اقساط", "مدیریت تحت تکفل", "بیمه سربازی", "کمک هزینه ازدواج",
+        "وام تامین اجتماعی", "خدمات بیمه کشوری", "خدمات بیمه نیروهای مسلح",
+        "خرید بیمه", "تمدید بیمه", "بیمه خودرو", "تخفیف بیمه",
+        "دیگر خدمات بیمه و تامین"
+    ],
+    "دیگر خدمات": []
+}
+
 async def get_user_from_db(user_id: int):
     async with db_pool.acquire() as conn:
         return await conn.fetchrow("SELECT * FROM users WHERE user_id=$1", user_id)
@@ -317,11 +375,15 @@ def main_menu_keyboard():
     kb.add(KeyboardButton("🔍 جستجو اطلاعیه/خبر"))
     kb.add(KeyboardButton("🔔 دریافت خودکار اطلاعیه/خبر"))
     kb.add(KeyboardButton("⚙️ تنظیمات"))
+    kb.add(KeyboardButton("🛠 سفارش خدمات"))
     kb.add(KeyboardButton("📝 ثبت نام"))  # دکمه ثبت نام
+    if is_admin:
+        kb.add("⚙️ مدیریت")
     return kb
 
 @dp.message_handler(commands=["start"])
 async def cmd_start(msg: types.Message):
+    is_admin = msg.from_user.id in ADMINS
     await msg.answer("سلام 👋\nمنو را انتخاب کنید:", reply_markup=main_menu_keyboard())
 
 # ----------------- هندلر ثبت‌نام -----------------
@@ -635,6 +697,183 @@ async def callback_tag_search(call: types.CallbackQuery):
         row = await get_post_db_row_by_message_id(r["message_id"])
         tags = await get_hashtags_for_post(row["id"]) if row else []
         await copy_post_to_user(call.from_user.id, CHANNEL_ID_INT, r["message_id"], tags)
+
+# ========================
+# سفارش خدمات
+# ========================
+@dp.message_handler(lambda m: m.text == "🛠 سفارش خدمات")
+async def show_services_menu(msg: types.Message):
+    kb = InlineKeyboardMarkup(row_width=2)
+    for category in SERVICES.keys():
+        kb.add(InlineKeyboardButton(category, callback_data=f"service_cat:{category}"))
+    await msg.answer("📂 دسته‌بندی خدمات:", reply_markup=kb)
+
+# ========================
+# انتخاب دسته‌بندی
+# ========================
+@dp.callback_query_handler(lambda c: c.data.startswith("service_cat:"))
+async def show_service_items(call: types.CallbackQuery):
+    category = call.data.split(":", 1)[1]
+    kb = InlineKeyboardMarkup(row_width=2)
+    for item in SERVICES[category]:
+        kb.add(InlineKeyboardButton(item, callback_data=f"service_item:{item}"))
+    kb.add(InlineKeyboardButton("⬅️ بازگشت", callback_data="back_to_services"))
+    await call.message.edit_text(f"📌 خدمات در دسته‌ی {category}:", reply_markup=kb)
+    await call.answer()
+
+# ========================
+# انتخاب یک خدمت
+# ========================
+@dp.callback_query_handler(lambda c: c.data.startswith("service_item:"))
+async def request_service(call: types.CallbackQuery):
+    service = call.data.split(":", 1)[1]
+
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("📤 ارسال مدارک", callback_data=f"send_docs:{service}"))
+
+    await call.message.answer(
+        f"✅ شما خدمت «{service}» را انتخاب کردید.\n\n"
+        "📋 مدارک و اطلاعات مورد نیاز:\n"
+        "1️⃣ کارت ملی\n2️⃣ شناسنامه\n3️⃣ فرم تکمیل‌شده مربوطه\n\n"
+        "لطفاً پس از آماده‌سازی مدارک دکمه زیر را بزنید.",
+        reply_markup=kb
+    )
+    await call.answer()
+
+# ========================
+# ارسال مدارک
+# ========================
+@dp.callback_query_handler(lambda c: c.data.startswith("send_docs:"))
+async def start_sending_docs(call: types.CallbackQuery, state: FSMContext):
+    service = call.data.split(":", 1)[1]
+    await state.update_data(service_name=service, docs=[])
+    
+    await call.message.answer(
+        f"📤 لطفاً مدارک و اطلاعات لازم برای خدمت «{service}» را ارسال کنید.\n"
+        "📝 هر پیام می‌تواند حاوی بخشی از مدارک باشد.\n"
+        "✅ پس از ارسال تمام مدارک، دکمه «درخواست نهایی» را بزنید."
+    )
+
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("📝 درخواست نهایی", callback_data="finalize_order"))
+    await call.message.answer("⏺️ دکمه زیر را پس از آماده شدن مدارک بزنید:", reply_markup=kb)
+
+    await state.set_state(ServiceOrder.waiting_for_docs)
+
+@dp.message_handler(state=ServiceOrder.waiting_for_docs, content_types=types.ContentTypes.ANY)
+async def collect_docs(msg: types.Message, state: FSMContext):
+    data = await state.get_data()
+    docs = data.get("docs", [])
+    docs.append(msg)
+    await state.update_data(docs=docs)
+    await msg.answer("✅ مدارک دریافت شد. اگر تمام شد، دکمه «درخواست نهایی» را بزنید.")
+
+@dp.callback_query_handler(lambda c: c.data == "finalize_order", state=ServiceOrder.waiting_for_docs)
+async def finalize_order(call: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    service = data["service_name"]
+    docs = data["docs"]
+    user_id = call.from_user.id
+
+    # ساخت یک order_id ساده
+    import random, string
+    order_id = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+
+    # ارسال مدارک به مدیر
+    for msg in docs:
+        if msg.content_type == "text":
+            await bot.send_message(ADMIN_CHAT_ID,
+                f"🆔 سفارش: {order_id}\n👤 کاربر: {user_id}\n\n{msg.text}"
+            )
+        elif msg.content_type in ["photo", "document", "video"]:
+            # ارسال فایل‌ها به همراه متن (اگر وجود داشته باشه)
+            caption = f"🆔 سفارش: {order_id}\n👤 کاربر: {user_id}"
+            if msg.caption:
+                caption += f"\n\n{msg.caption}"
+            if msg.content_type == "photo":
+                await bot.send_photo(ADMIN_CHAT_ID, msg.photo[-1].file_id, caption=caption)
+            elif msg.content_type == "document":
+                await bot.send_document(ADMIN_CHAT_ID, msg.document.file_id, caption=caption)
+            elif msg.content_type == "video":
+                await bot.send_video(ADMIN_CHAT_ID, msg.video.file_id, caption=caption)
+
+    # ایجاد کیبورد اتمام خدمت برای مدیر
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("✅ اتمام خدمت", callback_data=f"complete_order:{order_id}:{user_id}"))
+    await bot.send_message(ADMIN_CHAT_ID, f"📌 سفارش {order_id} آماده بررسی است.", reply_markup=kb)
+
+    await call.message.answer(f"🎉 سفارش شما با موفقیت ثبت شد! کد سفارش شما: {order_id}")
+    await state.clear()
+
+@dp.callback_query_handler(lambda c: c.data.startswith("complete_order:"))
+async def complete_order(call: types.CallbackQuery):
+    _, order_id, user_id = call.data.split(":")
+    await call.message.edit_text(f"✅ سفارش {order_id} توسط مدیر تکمیل شد.")
+    # در صورت استفاده از دیتابیس، اینجا سفارش حذف شود.
+
+
+# ========================
+# مدیریت
+# ========================
+@dp.message_handler(lambda m: m.text == "⚙️ مدیریت" and m.from_user.id in ADMINS)
+async def admin_menu(msg: types.Message):
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add("➕ افزودن خدمات", "🗂 مدیریت خدمات")
+    kb.add("🔙 بازگشت به منو اصلی")
+    await msg.answer("بخش مدیریت:", reply_markup=kb)
+
+
+# ========================
+# انتخاب دسته بندی
+# ========================
+@dp.message_handler(lambda m: m.text == "➕ افزودن خدمات", user_id=ADMINS)
+async def add_service_start(msg: types.Message):
+    # گرفتن دسته‌بندی‌ها از دیتابیس
+    cats = await db.fetch("SELECT * FROM service_categories")
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    for c in cats:
+        kb.add(c["name"])
+    kb.add("🔙 انصراف")
+    await AddService.waiting_for_category.set()
+    await msg.answer("یک دسته‌بندی انتخاب کنید:", reply_markup=kb)
+
+# ========================
+# عنوان خدمت
+# ========================
+@dp.message_handler(state=AddService.waiting_for_category)
+async def add_service_category(msg: types.Message, state: FSMContext):
+    cat_name = msg.text.strip()
+    category = await db.fetchrow("SELECT * FROM service_categories WHERE name=$1", cat_name)
+    if not category:
+        await msg.answer("❌ دسته‌بندی معتبر نیست. دوباره انتخاب کنید.")
+        return
+    await state.update_data(category_id=category["id"])
+    await AddService.waiting_for_title.set()
+    await msg.answer("عنوان خدمت را وارد کنید:")
+
+# ========================
+# مدارک لازم
+# ========================
+@dp.message_handler(state=AddService.waiting_for_title)
+async def add_service_title(msg: types.Message, state: FSMContext):
+    await state.update_data(title=msg.text.strip())
+    await AddService.waiting_for_documents.set()
+    await msg.answer("مدارک لازم را وارد کنید (مثال: کارت ملی، شناسنامه و ...):")
+
+# ========================
+# ثبت خدمت
+# ========================
+@dp.message_handler(state=AddService.waiting_for_documents)
+async def add_service_documents(msg: types.Message, state: FSMContext):
+    data = await state.get_data()
+    await db.execute(
+        "INSERT INTO services (category_id, title, required_documents) VALUES ($1,$2,$3)",
+        data["category_id"], data["title"], msg.text.strip()
+    )
+    await state.finish()
+    await msg.answer("✅ خدمت با موفقیت ثبت شد.", reply_markup=main_menu(True))
+
+
 
 # --- تنظیمات تعداد پست ---
 @dp.message_handler(lambda m: m.text == "⚙️ تنظیمات")
