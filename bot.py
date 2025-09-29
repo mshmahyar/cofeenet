@@ -9,6 +9,8 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from aiogram.dispatcher import FSMContext
 from aiogram.contrib.fsm_storage.base import BaseStorage
 from aiogram.dispatcher.filters.state import State, StatesGroup
+from fsm_storage_postgres import PostgresStorage
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
 
 # ----------------- تنظیمات از ENV -----------------
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
@@ -31,12 +33,14 @@ async def create_pool():
         max_size=5
     )
 
-# on_startup: تنظیم storage و اتصال به دیتابیس
+# on_startup:
 async def on_startup(dp):
-    pool = await create_pool()
-    storage = PostgresStorage(pool)
-    dp.storage = storage
-    logging.info("✅ Storage & Database connected successfully.")
+    pool = await asyncpg.create_pool(dsn=DATABASE_URL, min_size=1, max_size=5)
+    pg_storage = PostgresStorage(pool)
+    await pg_storage.create_table()          # جدول رو بساز/اطمینان حاصل کن
+    dp.storage = pg_storage                  # جایگزین storage
+    # (اگر می‌خوای pool رو برای استفاده جای دیگه ذخیره کنی، میتونی dp['db_pool']=pool)
+    # logging.info("Postgres FSM storage ready")
 
 # ========= کلاس مدیریت FSM در PostgreSQL =========
 class PostgresStorage:
@@ -863,37 +867,51 @@ async def start_sending_docs(call: types.CallbackQuery, state: FSMContext):
 async def collect_docs(msg: types.Message, state: FSMContext):
     data = await state.get_data()
     docs = data.get("docs", [])
-    docs.append(msg)
+
+    if msg.content_type == "text":
+        docs.append({"type": "text", "text": msg.text})
+    elif msg.content_type == "photo":
+        file_id = msg.photo[-1].file_id
+        docs.append({"type": "photo", "file_id": file_id, "caption": msg.caption})
+    elif msg.content_type == "document":
+        docs.append({
+            "type": "document",
+            "file_id": msg.document.file_id,
+            "file_name": msg.document.file_name,
+            "caption": msg.caption
+        })
+    else:
+        # fallback: ذخیره نوع پیام و متن (در صورت نیاز)
+        docs.append({"type": msg.content_type, "raw_text": msg.text or ""})
+
     await state.update_data(docs=docs)
-    await msg.answer("✅ مدارک دریافت شد. اگر تمام شد، دکمه «درخواست نهایی» را بزنید.")
+    await msg.answer("✅ مدرک دریافت شد. اگر تمام شد، دکمه «درخواست نهایی» را بزنید.")
+
 
 @dp.callback_query_handler(lambda c: c.data == "finalize_order", state=ServiceOrder.waiting_for_docs)
 async def finalize_order(call: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    service = data["service_name"]
-    docs = data["docs"]
+    docs = data.get("docs", [])
+    service = data.get("service_name", "بدون عنوان")
     user_id = call.from_user.id
 
-    import random, string
-    order_id = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    order_id = generate_order_id()  # مثلاً تابع تولید کد 6 رقمی
 
-    # ارسال مدارک به مدیر
-    for msg in docs:
-        if msg.content_type == "text":
-            await bot.send_message(
-                ADMIN_CHAT_ID,
-                f"🆔 سفارش: {order_id}\n👤 کاربر: {user_id}\nخدمت: {service}\n\n{msg.text}"
-            )
-        elif msg.content_type in ["photo", "document", "video"]:
-            caption = f"🆔 سفارش: {order_id}\n👤 کاربر: {user_id}\nخدمت: {service}"
-            if msg.caption:
-                caption += f"\n\n{msg.caption}"
-            if msg.content_type == "photo":
-                await bot.send_photo(ADMIN_CHAT_ID, msg.photo[-1].file_id, caption=caption)
-            elif msg.content_type == "document":
-                await bot.send_document(ADMIN_CHAT_ID, msg.document.file_id, caption=caption)
-            elif msg.content_type == "video":
-                await bot.send_video(ADMIN_CHAT_ID, msg.video.file_id, caption=caption)
+    # ارسال به ادمین
+    for d in docs:
+        if d["type"] == "text":
+            await bot.send_message(7918162941, f"🆔 {order_id}\n👤 {user_id}\n{d['text']}")
+        elif d["type"] == "photo":
+            await bot.send_photo(7918162941, d["file_id"], caption=f"🆔 {order_id}\n👤 {user_id}\n{d.get('caption','')}")
+        elif d["type"] == "document":
+            await bot.send_document(7918162941, d["file_id"], caption=f"🆔 {order_id}\n👤 {user_id}\n{d.get('caption','')}")
+        else:
+            await bot.send_message(7918162941, f"🆔 {order_id}\n👤 {user_id}\nنوع: {d.get('type')}")
+
+    await call.message.answer(f"🎉 سفارش ثبت شد — کد: {order_id}")
+    await state.finish()
+    await call.answer()
+
 
     # پیام تأیید برای کاربر
     await call.message.answer(
