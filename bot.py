@@ -8,15 +8,7 @@ from aiogram.utils import executor
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.dispatcher import FSMContext
 from aiogram.contrib.fsm_storage.base import BaseStorage
-from aiogram.contrib.fsm_storage.redis import RedisStorage2
 from aiogram.dispatcher.filters.state import State, StatesGroup
-
-
-
-
-
-
-
 
 # ----------------- تنظیمات از ENV -----------------
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
@@ -24,6 +16,27 @@ DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 CHANNEL_ID = os.getenv("CHANNEL_ID", "").strip()
 CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "").strip()  # اختیاری
 ADMINS = [7918162941]
+
+logging.basicConfig(level=logging.INFO)
+
+# ساخت ربات و دیسپچر
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher(bot, storage=MemoryStorage())  # فعلاً موقت، تو on_startup ست میشه
+
+# اتصال به دیتابیس asyncpg
+async def create_pool():
+    return await asyncpg.create_pool(
+        dsn=DATABASE_URL,
+        min_size=1,
+        max_size=5
+    )
+
+# on_startup: تنظیم storage و اتصال به دیتابیس
+async def on_startup(dp):
+    pool = await create_pool()
+    storage = PostgresStorage(pool)
+    dp.storage = storage
+    logging.info("✅ Storage & Database connected successfully.")
 
 # ========= کلاس مدیریت FSM در PostgreSQL =========
 class PostgresStorage:
