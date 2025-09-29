@@ -19,13 +19,15 @@ class AddService(StatesGroup):
     waiting_for_documents = State()
     waiting_for_price = State()
 
+ADMIN_CHAT_ID = 7918162941
+
 
 # ----------------- تنظیمات از ENV -----------------
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 CHANNEL_ID = os.getenv("CHANNEL_ID", "").strip()
 CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "").strip()  # اختیاری
-ADMIN_CHAT_ID = 123456789
+
 
 if not BOT_TOKEN or not DATABASE_URL or not CHANNEL_ID:
     raise RuntimeError("لطفاً BOT_TOKEN, DATABASE_URL و CHANNEL_ID را در ENV ست کنید.")
