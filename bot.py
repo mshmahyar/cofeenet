@@ -12,6 +12,11 @@ class ServiceOrder(StatesGroup):
     waiting_for_docs = State()
     waiting_for_confirmation = State()
 
+class AddService(StatesGroup):
+    waiting_for_category = State()
+    waiting_for_title = State()
+    waiting_for_documents = State()
+
 
 # ----------------- تنظیمات از ENV -----------------
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
