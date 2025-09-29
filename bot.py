@@ -1,15 +1,66 @@
 import os
 import re
+import json
 import asyncio
 import asyncpg
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.dispatcher import FSMContext
+from aiogram.contrib.fsm_storage.base import BaseStorage
 from aiogram.contrib.fsm_storage.redis import RedisStorage2
 from aiogram.dispatcher.filters.state import State, StatesGroup
 
-ADMINS = [123456789]
+
+
+
+
+
+
+
+# ----------------- تنظیمات از ENV -----------------
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+CHANNEL_ID = os.getenv("CHANNEL_ID", "").strip()
+CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "").strip()  # اختیاری
+ADMINS = [7918162941]
+
+# ========= کلاس مدیریت FSM در PostgreSQL =========
+class PostgresStorage:
+    def __init__(self, pool):
+        self.pool = pool
+
+    async def set_state(self, chat_id, user_id, state):
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO fsm_states (chat_id, user_id, state)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (chat_id, user_id) DO UPDATE SET state = $3
+            """, chat_id, user_id, state)
+
+    async def get_state(self, chat_id, user_id):
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT state FROM fsm_states
+                WHERE chat_id=$1 AND user_id=$2
+            """, chat_id, user_id)
+            return row['state'] if row else None
+
+    async def finish(self, chat_id, user_id):
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                DELETE FROM fsm_states WHERE chat_id=$1 AND user_id=$2
+            """, chat_id, user_id)
+
+# ========= ساخت جدول FSM در PostgreSQL =========
+CREATE_FSM_TABLE = """
+CREATE TABLE IF NOT EXISTS fsm_states (
+    chat_id BIGINT,
+    user_id BIGINT,
+    state TEXT,
+    PRIMARY KEY (chat_id, user_id)
+);
+"""
 
 class ServiceOrder(StatesGroup):
     waiting_for_docs = State()
@@ -22,16 +73,9 @@ class AddService(StatesGroup):
     waiting_for_documents = State()
     waiting_for_price = State()
 
-
-
-
-
-# ----------------- تنظیمات از ENV -----------------
-BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-CHANNEL_ID = os.getenv("CHANNEL_ID", "").strip()
-CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "").strip()  # اختیاری
-
+class PostgresStorage(BaseStorage):
+    def __init__(self, pool: asyncpg.pool.Pool):
+        self.pool = pool
 
 if not BOT_TOKEN or not DATABASE_URL or not CHANNEL_ID:
     raise RuntimeError("لطفاً BOT_TOKEN, DATABASE_URL و CHANNEL_ID را در ENV ست کنید.")
@@ -132,6 +176,10 @@ SERVICES = {
     ],
     "دیگر خدمات": []
 }
+
+
+
+
 
 async def get_user_from_db(user_id: int):
     async with db_pool.acquire() as conn:
