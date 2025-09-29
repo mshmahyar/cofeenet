@@ -6,6 +6,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.dispatcher import FSMContext
+from aiogram.contrib.fsm_storage.redis import RedisStorage2
 from aiogram.dispatcher.filters.state import State, StatesGroup
 
 ADMINS = [123456789]
@@ -13,14 +14,16 @@ ADMINS = [123456789]
 class ServiceOrder(StatesGroup):
     waiting_for_docs = State()
     waiting_for_confirmation = State()
-
+    confirm = State()
+    
 class AddService(StatesGroup):
     waiting_for_category = State()
     waiting_for_title = State()
     waiting_for_documents = State()
     waiting_for_price = State()
 
-ADMIN_CHAT_ID = 7918162941
+
+
 
 
 # ----------------- تنظیمات از ENV -----------------
@@ -35,7 +38,8 @@ if not BOT_TOKEN or not DATABASE_URL or not CHANNEL_ID:
 
 CHANNEL_ID_INT = int(CHANNEL_ID)
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(bot)
+storage = RedisStorage2(host='localhost', port=6379, db=5)
+dp = Dispatcher(bot, storage=storage)
 
 waiting_for_keyword: dict[int, bool] = {}
 waiting_for_limit: dict[int, bool] = {}
@@ -414,6 +418,7 @@ def main_menu_keyboard(user_id=None):
 
 @dp.message_handler(commands=["start"])
 async def cmd_start(msg: types.Message):
+    kb = main_menu_keyboard(message.from_user.id)
     await msg.answer(
         "سلام 👋\nمنو را انتخاب کنید:",
         reply_markup=main_menu_keyboard(msg.from_user.id)
@@ -808,19 +813,18 @@ async def finalize_order(call: types.CallbackQuery, state: FSMContext):
     docs = data["docs"]
     user_id = call.from_user.id
 
-    # ساخت یک order_id ساده
     import random, string
     order_id = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
     # ارسال مدارک به مدیر
     for msg in docs:
         if msg.content_type == "text":
-            await bot.send_message(ADMIN_CHAT_ID,
-                f"🆔 سفارش: {order_id}\n👤 کاربر: {user_id}\n\n{msg.text}"
+            await bot.send_message(
+                ADMIN_CHAT_ID,
+                f"🆔 سفارش: {order_id}\n👤 کاربر: {user_id}\nخدمت: {service}\n\n{msg.text}"
             )
         elif msg.content_type in ["photo", "document", "video"]:
-            # ارسال فایل‌ها به همراه متن (اگر وجود داشته باشه)
-            caption = f"🆔 سفارش: {order_id}\n👤 کاربر: {user_id}"
+            caption = f"🆔 سفارش: {order_id}\n👤 کاربر: {user_id}\nخدمت: {service}"
             if msg.caption:
                 caption += f"\n\n{msg.caption}"
             if msg.content_type == "photo":
@@ -830,13 +834,17 @@ async def finalize_order(call: types.CallbackQuery, state: FSMContext):
             elif msg.content_type == "video":
                 await bot.send_video(ADMIN_CHAT_ID, msg.video.file_id, caption=caption)
 
-    # ایجاد کیبورد اتمام خدمت برای مدیر
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("✅ اتمام خدمت", callback_data=f"complete_order:{order_id}:{user_id}"))
-    await bot.send_message(ADMIN_CHAT_ID, f"📌 سفارش {order_id} آماده بررسی است.", reply_markup=kb)
+    # پیام تأیید برای کاربر
+    await call.message.answer(
+        f"✅ سفارش شما با کد `{order_id}` ثبت شد.\n"
+        f"🔹 خدمت: {service}\n"
+        f"📎 تعداد مدارک: {len(docs)}",
+        parse_mode="Markdown"
+    )
 
-    await call.message.answer(f"🎉 سفارش شما با موفقیت ثبت شد! کد سفارش شما: {order_id}")
+    # پاک کردن وضعیت
     await state.clear()
+
 
 @dp.callback_query_handler(lambda c: c.data.startswith("complete_order:"))
 async def complete_order(call: types.CallbackQuery):
