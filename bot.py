@@ -96,7 +96,7 @@ if not BOT_TOKEN or not DATABASE_URL or not CHANNEL_ID:
 
 CHANNEL_ID_INT = int(CHANNEL_ID)
 bot = Bot(token=BOT_TOKEN)
-pool = await asyncpg.create_pool(dsn="postgres://USER:PASSWORD@HOST:PORT/DBNAME")
+pool = await asyncpg.create_pool(dsn="postgresql://neondb_owner:npg_DUIlYT50kBVM@ep-late-butterfly-adhgsyhk-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require")
 storage = PostgresStorage(pool)
 dp = Dispatcher(bot, storage=storage)
 
