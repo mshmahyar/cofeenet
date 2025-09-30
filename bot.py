@@ -34,10 +34,16 @@ async def create_pool():
     )
 
 # on_startup:
-async def on_startup(dp):
+async def on_startup(dispatcher):
+    await init_db()
     pool = await asyncpg.create_pool(dsn=DATABASE_URL, min_size=1, max_size=5)
     pg_storage = PostgresStorage(pool)
-    await pg_storage.create_table()          # جدول رو بساز/اطمینان حاصل کن
+    await pg_storage.create_table()
+    dispatcher.storage = pg_storage
+    print("بوت شروع شد.")
+
+
+      # جدول رو بساز/اطمینان حاصل کن
     dp.storage = pg_storage                  # جایگزین storage
     # (اگر می‌خوای pool رو برای استفاده جای دیگه ذخیره کنی، میتونی dp['db_pool']=pool)
     # logging.info("Postgres FSM storage ready")
@@ -195,7 +201,8 @@ SERVICES = {
 }
 
 
-
+def generate_order_id(length=6):
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
 
 
 async def get_user_from_db(user_id: int):
@@ -949,7 +956,8 @@ async def admin_menu(msg: types.Message):
 @dp.message_handler(lambda m: m.text == "➕ افزودن خدمات", user_id=ADMINS)
 async def add_service_start(msg: types.Message):
     # گرفتن دسته‌بندی‌ها از دیتابیس
-    cats = await db.fetch("SELECT * FROM service_categories")
+    async with db_pool.acquire() as conn:
+    cats = await conn.fetch("SELECT * FROM service_categories")
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     for c in cats:
         kb.add(c["name"])
@@ -989,11 +997,6 @@ async def add_service_docs(message: types.Message, state: FSMContext):
     await message.answer("💰 هزینه تقریبی خدمت را وارد کنید (به تومان):")
     await AddService.waiting_for_price.set()
 
-@dp.message_handler(state=AddService.waiting_for_documents)
-async def add_service_docs(message: types.Message, state: FSMContext):
-    await state.update_data(documents=message.text.strip())
-    await message.answer("💰 هزینه تقریبی خدمت را وارد کنید (به تومان):")
-    await AddService.waiting_for_price.set()
 
 
 # --- تنظیمات تعداد پست ---
@@ -1023,9 +1026,6 @@ async def handle_set_search_limit(msg: types.Message):
         await msg.answer("❌ لطفاً یک عدد معتبر وارد کنید.")
 
 # ----------------- startup/shutdown -----------------
-async def on_startup(dispatcher):
-    await init_db()
-    print("بوت شروع شد.")
 
 async def on_shutdown(dispatcher):
     if db_pool:
