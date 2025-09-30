@@ -96,7 +96,8 @@ if not BOT_TOKEN or not DATABASE_URL or not CHANNEL_ID:
 
 CHANNEL_ID_INT = int(CHANNEL_ID)
 bot = Bot(token=BOT_TOKEN)
-storage = RedisStorage2(host='localhost', port=6379, db=5)
+pool = await asyncpg.create_pool(dsn="postgres://USER:PASSWORD@HOST:PORT/DBNAME")
+storage = PostgresStorage(pool)
 dp = Dispatcher(bot, storage=storage)
 
 waiting_for_keyword: dict[int, bool] = {}
