@@ -22,7 +22,7 @@ ADMINS = [7918162941]
 logging.basicConfig(level=logging.INFO)
 
 # ساخت ربات و دیسپچر
-bot = Bot(token=API_TOKEN)
+bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot, storage=MemoryStorage())  # فعلاً موقت، تو on_startup ست میشه
 
 # اتصال به دیتابیس asyncpg
