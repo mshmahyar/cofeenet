@@ -95,10 +95,12 @@ if not BOT_TOKEN or not DATABASE_URL or not CHANNEL_ID:
     raise RuntimeError("لطفاً BOT_TOKEN, DATABASE_URL و CHANNEL_ID را در ENV ست کنید.")
 
 CHANNEL_ID_INT = int(CHANNEL_ID)
-bot = Bot(token=BOT_TOKEN)
-pool = await asyncpg.create_pool(dsn=DATABASE_URL)
-storage = PostgresStorage(pool)
-dp = Dispatcher(bot, storage=storage)
+
+async def main():
+    bot = Bot(token=BOT_TOKEN)
+    pool = await asyncpg.create_pool(dsn=DATABASE_URL)
+    storage = PostgresStorage(pool)
+    dp = Dispatcher(bot, storage=storage)
 
 waiting_for_keyword: dict[int, bool] = {}
 waiting_for_limit: dict[int, bool] = {}
