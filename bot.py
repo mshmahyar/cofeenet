@@ -482,7 +482,7 @@ def main_menu_keyboard(user_id=None):
 
 
 @dp.message_handler(commands=["start"])
-async def cmd_start(msg: types.Message):
+async def cmd_start(message: types.Message):
     kb = main_menu_keyboard(message.from_user.id)
     await msg.answer(
         "سلام 👋\nمنو را انتخاب کنید:",
