@@ -90,9 +90,6 @@ class AddService(StatesGroup):
     waiting_for_documents = State()
     waiting_for_price = State()
 
-class PostgresStorage(BaseStorage):
-    def __init__(self, pool: asyncpg.pool.Pool):
-        self.pool = pool
 
 if not BOT_TOKEN or not DATABASE_URL or not CHANNEL_ID:
     raise RuntimeError("لطفاً BOT_TOKEN, DATABASE_URL و CHANNEL_ID را در ENV ست کنید.")
